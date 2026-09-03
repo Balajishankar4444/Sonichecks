@@ -1,10 +1,38 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, ShieldCheck, HelpCircle, ArrowRight, Zap } from 'lucide-react';
+import { CheckCircle2, ShieldCheck, Zap, Loader2, Sparkles, CreditCard, Check } from 'lucide-react';
 
 export default function PricingPage() {
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [checkoutNotice, setCheckoutNotice] = useState<string | null>(null);
+
+  const handleCheckout = async (plan: 'pro' | 'studio') => {
+    setLoadingPlan(plan);
+    setCheckoutNotice(null);
+
+    try {
+      const res = await fetch('/api/checkout/creem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan })
+      });
+
+      const data = await res.json();
+      if (data.checkoutUrl) {
+        // Redirect to Creem Checkout
+        window.location.href = data.checkoutUrl;
+      } else {
+        setCheckoutNotice(`Creem Checkout initialized for ${plan.toUpperCase()} plan.`);
+      }
+    } catch (err: any) {
+      alert(`Checkout error: ${err.message || 'Failed to start checkout'}`);
+    } finally {
+      setLoadingPlan(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-16 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto space-y-12">
@@ -15,12 +43,20 @@ export default function PricingPage() {
             <span>Fair, Transparent Pricing</span>
           </div>
           <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight">
-            Plans built for every creator & studio
+            Plans built for every creator &amp; studio
           </h1>
           <p className="text-slate-400 text-sm sm:text-base max-w-xl mx-auto">
             Get deterministic audio quality assurance with simple monthly plans. Cancel anytime.
           </p>
         </div>
+
+        {/* Notice if checkout returned */}
+        {checkoutNotice && (
+          <div className="p-4 rounded-xl bg-cyan-950/40 border border-cyan-500/40 text-cyan-300 text-xs flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+            <span>{checkoutNotice}</span>
+          </div>
+        )}
 
         {/* Pricing Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -59,26 +95,33 @@ export default function PricingPage() {
             <div className="space-y-4">
               <div>
                 <h3 className="text-xl font-bold text-white">Pro</h3>
-                <p className="text-xs text-cyan-400 mt-1">For active producers, podcasters, & voiceover artists</p>
+                <p className="text-xs text-cyan-400 mt-1">For active producers, podcasters, &amp; voiceover artists</p>
               </div>
               <div className="text-4xl font-black text-white">
-                €5<span className="text-sm font-normal text-slate-400">/month</span>
+                €4.99<span className="text-sm font-normal text-slate-400">/month</span>
               </div>
               <ul className="space-y-2.5 text-xs text-slate-300 pt-2 border-t border-slate-800">
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> 100 audio checks / month</li>
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Multi-track batch analysis (20 files)</li>
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Downloadable PDF Inspection Reports</li>
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> CSV Batch Export</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Streaming, EBU R128 & ACX Profiles</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Streaming, EBU R128 &amp; ACX Profiles</li>
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Cross-file consistency warnings</li>
               </ul>
             </div>
-            <Link
-              href="/check"
-              className="w-full py-3 rounded-xl font-bold text-xs text-center text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-lg shadow-cyan-500/25 transition-all"
+            <button
+              type="button"
+              onClick={() => handleCheckout('pro')}
+              disabled={loadingPlan === 'pro'}
+              className="w-full py-3 rounded-xl font-bold text-xs text-center text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-lg shadow-cyan-500/25 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              Get Pro Access
-            </Link>
+              {loadingPlan === 'pro' ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CreditCard className="w-4 h-4" />
+              )}
+              <span>Subscribe Pro — €4.99/mo</span>
+            </button>
           </div>
 
           {/* Studio */}
@@ -86,10 +129,10 @@ export default function PricingPage() {
             <div className="space-y-4">
               <div>
                 <h3 className="text-xl font-bold text-white">Studio</h3>
-                <p className="text-xs text-slate-400 mt-1">For mastering studios, labels, & post-production teams</p>
+                <p className="text-xs text-slate-400 mt-1">For mastering studios, labels, &amp; post-production teams</p>
               </div>
               <div className="text-4xl font-black text-white">
-                €15<span className="text-sm font-normal text-slate-400">/month</span>
+                €14.99<span className="text-sm font-normal text-slate-400">/month</span>
               </div>
               <ul className="space-y-2.5 text-xs text-slate-300 pt-2 border-t border-slate-800">
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> 500 audio checks / month</li>
@@ -99,18 +142,31 @@ export default function PricingPage() {
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Priority processing queue</li>
               </ul>
             </div>
-            <Link
-              href="/check"
-              className="w-full py-3 rounded-xl font-bold text-xs text-center text-slate-200 bg-slate-800 hover:bg-slate-700 transition-colors"
+            <button
+              type="button"
+              onClick={() => handleCheckout('studio')}
+              disabled={loadingPlan === 'studio'}
+              className="w-full py-3 rounded-xl font-bold text-xs text-center text-slate-200 bg-slate-800 hover:bg-slate-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              Get Studio Access
-            </Link>
+              {loadingPlan === 'studio' ? (
+                <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+              ) : (
+                <CreditCard className="w-4 h-4 text-cyan-400" />
+              )}
+              <span>Subscribe Studio — €14.99/mo</span>
+            </button>
           </div>
+        </div>
+
+        {/* Secure Checkout Notice */}
+        <div className="text-center text-xs text-slate-400 flex items-center justify-center gap-2 pt-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+          <span>Secured checkout powered by Creem. 256-bit encrypted payments.</span>
         </div>
 
         {/* FAQ */}
         <div className="max-w-3xl mx-auto space-y-6 pt-8 border-t border-slate-900">
-          <h3 className="text-xl font-bold text-white text-center">Billing & Plan Questions</h3>
+          <h3 className="text-xl font-bold text-white text-center">Billing &amp; Plan Questions</h3>
           <div className="space-y-3 text-xs text-slate-300">
             <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
               <strong className="text-white">How does usage counting work?</strong>

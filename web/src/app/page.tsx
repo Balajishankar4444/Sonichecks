@@ -362,7 +362,7 @@ export default function LandingPage() {
                   <p className="text-xs text-cyan-400">For active creators & producers</p>
                 </div>
                 <div className="text-3xl font-black text-white">
-                  €5<span className="text-xs font-normal text-slate-400">/mo</span>
+                  €4.99<span className="text-xs font-normal text-slate-400">/mo</span>
                 </div>
                 <ul className="space-y-2 text-xs text-slate-300">
                   <li className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" /> 100 files / month</li>
@@ -373,7 +373,7 @@ export default function LandingPage() {
                 </ul>
               </div>
               <Link
-                href="/check"
+                href="/pricing"
                 className="w-full py-2.5 rounded-xl font-bold text-xs text-center text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-md shadow-cyan-500/20 transition-all"
               >
                 Get Started with Pro
@@ -388,7 +388,7 @@ export default function LandingPage() {
                   <p className="text-xs text-slate-400">For mastering houses & labels</p>
                 </div>
                 <div className="text-3xl font-black text-white">
-                  €15<span className="text-xs font-normal text-slate-400">/mo</span>
+                  €14.99<span className="text-xs font-normal text-slate-400">/mo</span>
                 </div>
                 <ul className="space-y-2 text-xs text-slate-300">
                   <li className="flex items-center gap-2"><CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" /> 500 files / month</li>
@@ -398,7 +398,7 @@ export default function LandingPage() {
                 </ul>
               </div>
               <Link
-                href="/check"
+                href="/pricing"
                 className="w-full py-2.5 rounded-xl font-bold text-xs text-center text-slate-200 bg-slate-800 hover:bg-slate-700 transition-colors"
               >
                 Get Started with Studio
