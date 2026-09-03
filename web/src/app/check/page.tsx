@@ -265,74 +265,134 @@ export default function CheckPage() {
         setUsage(getUsageState(user?.email || undefined));
       } else {
         // === SERVER PYTHON / FASTAPI REFERENCE ENGINE ===
-        if (files.length === 1) {
-          setCurrentFilename(files[0].name);
-          setFileStatuses([{ filename: files[0].name, status: 'ANALYZING' }]);
-          
-          const singleResult = await analyzeSingleFile(
-            files[0],
-            selectedProfile.profile_id,
-            abortControllerRef.current.signal,
-            userTier
-          );
+        try {
+          if (files.length === 1) {
+            setCurrentFilename(files[0].name);
+            setFileStatuses([{ filename: files[0].name, status: 'ANALYZING' }]);
+            
+            const singleResult = await analyzeSingleFile(
+              files[0],
+              selectedProfile.profile_id,
+              abortControllerRef.current.signal,
+              userTier
+            );
 
-          const syntheticBatch: BatchQCResult = {
-            batch_id: singleResult.file_id,
-            created_at: new Date().toISOString(),
-            profile_id: selectedProfile.profile_id,
-            profile_name: selectedProfile.name,
-            files: [singleResult],
-            consistency_issues: [],
-            summary: {
-              total_files: 1,
-              passed: singleResult.overall_status === 'PASS' ? 1 : 0,
-              warnings: singleResult.overall_status === 'WARNING' ? 1 : 0,
-              failed: singleResult.overall_status === 'FAIL' ? 1 : 0,
-              errors: singleResult.overall_status === 'ERROR' ? 1 : 0,
-              avg_lufs: singleResult.loudness?.integrated_lufs ?? null,
-              highest_true_peak_dbtp: singleResult.peaks?.true_peak_dbtp ?? null,
-              total_duration_seconds: singleResult.file_info?.duration_seconds ?? 0,
-              batch_health: singleResult.overall_status === 'FAIL' ? 'CRITICAL_ISSUES' : singleResult.overall_status === 'WARNING' ? 'NEEDS_ATTENTION' : 'HEALTHY',
-              batch_health_reasons: []
-            },
-            overall_status: singleResult.overall_status
-          };
+            const syntheticBatch: BatchQCResult = {
+              batch_id: singleResult.file_id,
+              created_at: new Date().toISOString(),
+              profile_id: selectedProfile.profile_id,
+              profile_name: selectedProfile.name,
+              files: [singleResult],
+              consistency_issues: [],
+              summary: {
+                total_files: 1,
+                passed: singleResult.overall_status === 'PASS' ? 1 : 0,
+                warnings: singleResult.overall_status === 'WARNING' ? 1 : 0,
+                failed: singleResult.overall_status === 'FAIL' ? 1 : 0,
+                errors: singleResult.overall_status === 'ERROR' ? 1 : 0,
+                avg_lufs: singleResult.loudness?.integrated_lufs ?? null,
+                highest_true_peak_dbtp: singleResult.peaks?.true_peak_dbtp ?? null,
+                total_duration_seconds: singleResult.file_info?.duration_seconds ?? 0,
+                batch_health: singleResult.overall_status === 'FAIL' ? 'CRITICAL_ISSUES' : singleResult.overall_status === 'WARNING' ? 'NEEDS_ATTENTION' : 'HEALTHY',
+                batch_health_reasons: []
+              },
+              overall_status: singleResult.overall_status
+            };
 
-          setCompletedCount(1);
-          setFileStatuses([{ filename: files[0].name, status: 'DONE', qcResultStatus: singleResult.overall_status }]);
-          setBatchResult(syntheticBatch);
-          saveBatchToHistory(syntheticBatch, user?.email || undefined);
-          setUsage(getUsageState(user?.email || undefined));
-        } else {
-          const ticker = setInterval(() => {
-            setCompletedCount((prev) => {
-              const next = Math.min(files.length - 1, prev + 1);
-              if (next < files.length) {
-                setCurrentFilename(files[next]?.name);
-                setFileStatuses((statuses) =>
-                  statuses.map((s, idx) => {
-                    if (idx < next) return { ...s, status: 'DONE' };
-                    if (idx === next) return { ...s, status: 'ANALYZING' };
-                    return s;
-                  })
-                );
-              }
-              return next;
-            });
-          }, 400);
+            setCompletedCount(1);
+            setFileStatuses([{ filename: files[0].name, status: 'DONE', qcResultStatus: singleResult.overall_status }]);
+            setBatchResult(syntheticBatch);
+            saveBatchToHistory(syntheticBatch, user?.email || undefined);
+            setUsage(getUsageState(user?.email || undefined));
+          } else {
+            const ticker = setInterval(() => {
+              setCompletedCount((prev) => {
+                const next = Math.min(files.length - 1, prev + 1);
+                if (next < files.length) {
+                  setCurrentFilename(files[next]?.name);
+                  setFileStatuses((statuses) =>
+                    statuses.map((s, idx) => {
+                      if (idx < next) return { ...s, status: 'DONE' };
+                      if (idx === next) return { ...s, status: 'ANALYZING' };
+                      return s;
+                    })
+                  );
+                }
+                return next;
+              });
+            }, 400);
 
-          const result = await analyzeBatchFiles(
-            files,
-            selectedProfile.profile_id,
-            abortControllerRef.current.signal,
-            userTier
-          );
-          clearInterval(ticker);
+            const result = await analyzeBatchFiles(
+              files,
+              selectedProfile.profile_id,
+              abortControllerRef.current.signal,
+              userTier
+            );
+            clearInterval(ticker);
 
-          setCompletedCount(files.length);
-          setBatchResult(result);
-          saveBatchToHistory(result, user?.email || undefined);
-          setUsage(getUsageState(user?.email || undefined));
+            setCompletedCount(files.length);
+            setBatchResult(result);
+            saveBatchToHistory(result, user?.email || undefined);
+            setUsage(getUsageState(user?.email || undefined));
+          }
+        } catch (serverErr: any) {
+          // If server is not running, seamlessly fallback to Local Browser DSP Engine
+          if (serverErr.message?.includes('Failed to fetch') || serverErr.name === 'TypeError') {
+            console.warn('Python server unreachable. Automatically falling back to Browser DSP Engine.');
+            setEngineMode('LOCAL');
+            
+            const localFileResults: FileQCResult[] = [];
+            for (let i = 0; i < files.length; i++) {
+              const file = files[i];
+              setCurrentFilename(file.name);
+              setFileStatuses((prev) =>
+                prev.map((s, idx) => (idx === i ? { ...s, status: 'ANALYZING' } : s))
+              );
+
+              const measurements = await analyzeWavFileLocally(file);
+              const fileQcResult = convertLocalMeasurementsToFileQCResult(measurements, selectedProfile);
+              localFileResults.push(fileQcResult);
+
+              setCompletedCount(i + 1);
+              setFileStatuses((prev) =>
+                prev.map((s, idx) => (idx === i ? { ...s, status: 'DONE', qcResultStatus: fileQcResult.overall_status } : s))
+              );
+            }
+
+            const passed = localFileResults.filter((f) => f.overall_status === 'PASS').length;
+            const warnings = localFileResults.filter((f) => f.overall_status === 'WARNING').length;
+            const failed = localFileResults.filter((f) => f.overall_status === 'FAIL').length;
+            const errors = localFileResults.filter((f) => f.overall_status === 'ERROR').length;
+            const overall = failed > 0 || errors > 0 ? 'FAIL' : warnings > 0 ? 'WARNING' : 'PASS';
+
+            const syntheticBatch: BatchQCResult = {
+              batch_id: `batch_local_${Date.now()}`,
+              created_at: new Date().toISOString(),
+              profile_id: selectedProfile.profile_id,
+              profile_name: selectedProfile.name,
+              files: localFileResults,
+              consistency_issues: [],
+              summary: {
+                total_files: localFileResults.length,
+                passed,
+                warnings,
+                failed,
+                errors,
+                avg_lufs: localFileResults[0]?.loudness?.integrated_lufs ?? null,
+                highest_true_peak_dbtp: Math.max(...localFileResults.map(f => f.peaks?.true_peak_dbtp ?? -99)),
+                total_duration_seconds: localFileResults.reduce((acc, f) => acc + (f.file_info?.duration_seconds ?? 0), 0),
+                batch_health: overall === 'FAIL' ? 'CRITICAL_ISSUES' : overall === 'WARNING' ? 'NEEDS_ATTENTION' : 'HEALTHY',
+                batch_health_reasons: []
+              },
+              overall_status: overall
+            };
+
+            setBatchResult(syntheticBatch);
+            saveBatchToHistory(syntheticBatch, user?.email || undefined);
+            setUsage(getUsageState(user?.email || undefined));
+          } else {
+            throw serverErr;
+          }
         }
       }
     } catch (err: any) {
