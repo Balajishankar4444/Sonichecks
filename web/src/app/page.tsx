@@ -542,52 +542,46 @@ export default function LandingPage() {
             <div className="absolute left-[16%] right-[16%] top-10 hidden h-px bg-gradient-to-r from-transparent via-cyan-400/30 to-transparent lg:block" />
 
             {[
-              [
-                1,
-                Upload,
-                'Choose your audio',
-                'Select a track or batch and choose the delivery profile that matches your workflow.',
-              ],
-              [
-                2,
-                Activity,
-                'Run the inspection',
-                'Sonichecks calculates loudness, True Peak, clipping, silence and technical file properties.',
-              ],
-              [
-                3,
-                ShieldCheck,
-                'Get your verdict',
-                'See clear PASS, WARNING or FAIL results and export professional QC reports on supported plans.',
-              ],
-            ].map(([num, Icon, title, text]) => {
-              const StepIcon = Icon as React.ComponentType<{
-                className?: string;
-              }>;
+              {
+                num: 1,
+                Icon: Upload,
+                title: 'Choose your audio',
+                text: 'Select a track or batch and choose the delivery profile that matches your workflow.',
+              },
+              {
+                num: 2,
+                Icon: Activity,
+                title: 'Run the inspection',
+                text: 'Sonichecks calculates loudness, True Peak, clipping, silence and technical file properties.',
+              },
+              {
+                num: 3,
+                Icon: ShieldCheck,
+                title: 'Get your verdict',
+                text: 'See clear PASS, WARNING or FAIL results and export professional QC reports on supported plans.',
+              },
+            ].map(({ num, Icon, title, text }) => (
+              <div
+                key={num}
+                className="relative rounded-2xl border border-slate-800 bg-slate-900/60 p-7"
+              >
+                <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-400/25 bg-cyan-400/10 text-cyan-300">
+                  <Icon className="h-5 w-5" />
 
-              return (
-                <div
-                  key={num as number}
-                  className="relative rounded-2xl border border-slate-800 bg-slate-900/60 p-7"
-                >
-                  <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-400/25 bg-cyan-400/10 text-cyan-300">
-                    <StepIcon className="h-5 w-5" />
-
-                    <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-slate-950 font-mono text-[9px] font-bold text-cyan-300 ring-1 ring-cyan-400/20">
-                      {num}
-                    </span>
-                  </div>
-
-                  <h3 className="mt-8 text-lg font-bold text-white">
-                    {title as string}
-                  </h3>
-
-                  <p className="mt-2 text-xs leading-6 text-slate-500">
-                    {text as string}
-                  </p>
+                  <span className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-slate-950 font-mono text-[9px] font-bold text-cyan-300 ring-1 ring-cyan-400/20">
+                    {num}
+                  </span>
                 </div>
-              );
-            })}
+
+                <h3 className="mt-8 text-lg font-bold text-white">
+                  {title}
+                </h3>
+
+                <p className="mt-2 text-xs leading-6 text-slate-500">
+                  {text}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </section>

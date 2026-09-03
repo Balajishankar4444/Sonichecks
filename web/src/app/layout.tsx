@@ -4,7 +4,7 @@ import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { AuthProvider } from "@/context/AuthContext";
 import AuthModal from "@/components/auth/AuthModal";
-import { getOrganizationSchema, getWebApplicationSchema, getWebSiteSchema, BASE_URL } from "@/lib/seo/structured-data";
+import { getOrganizationSchema, getWebApplicationSchema, BASE_URL } from "@/lib/seo/structured-data";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,30 +26,25 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
   title: {
-    default: "Audio Quality Checker & QC Tool | LUFS, True Peak & Clipping | Sonichecks",
+    default: "Sonichecks — Automated Audio Quality Control & Loudness Checker",
     template: "%s | Sonichecks",
   },
-  description: "Check audio quality before delivery with Sonichecks. Analyze LUFS, True Peak, clipping, silence, format and more with deterministic audio QC.",
+  description: "Automated deterministic audio quality control for loudness (LUFS), True Peak (dBTP), format integrity, digital clipping, silence, and multi-track consistency. 100% local browser DSP compliant with ITU-R BS.1770-4 and EBU R128.",
   keywords: [
-    "audio quality checker",
-    "audio qc",
     "audio quality control",
-    "audio delivery checker",
-    "audio file analyzer",
-    "audio qc tool",
-    "lufs checker",
-    "lufs meter",
+    "audio qc",
+    "lufs meter online",
     "loudness checker",
-    "true peak checker",
-    "true peak meter",
-    "audio clipping checker",
-    "wav analyzer",
-    "wav quality checker",
-    "audio mastering qc",
-    "audio delivery specifications",
-    "broadcast audio qc",
-    "podcast audio checker",
-    "audiobook audio checker"
+    "true peak calculator",
+    "wav file validator",
+    "clipping detection",
+    "ebu r128 broadcast compliance",
+    "spotify loudness checker",
+    "apple music sound check validator",
+    "acx audiobook qc",
+    "audio mastering checker",
+    "audio compliance report",
+    "sha256 audio certificate"
   ],
   authors: [{ name: "Sonichecks Audio Engineering Team" }],
   creator: "Sonichecks",
@@ -69,14 +64,14 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: BASE_URL,
-    siteName: "Sonichecks",
-    title: "Audio Quality Checker & QC Tool | LUFS, True Peak & Clipping | Sonichecks",
-    description: "Check audio quality before delivery with Sonichecks. Analyze LUFS, True Peak, clipping, silence, format and more with deterministic audio QC.",
+    siteName: "Sonichecks Audio QC",
+    title: "Sonichecks — Automated Audio Quality Control & Loudness Checker",
+    description: "Inspect audio files locally in your browser for LUFS, True Peak, Clipping, and multi-track consistency with instant cryptographic PASS/FAIL PDF reports.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Audio Quality Checker & QC Tool | LUFS, True Peak & Clipping | Sonichecks",
-    description: "Check audio quality before delivery with Sonichecks. Analyze LUFS, True Peak, clipping, silence, format and more with deterministic audio QC.",
+    title: "Sonichecks — Automated Audio Quality Control & Loudness Checker",
+    description: "Deterministic in-browser audio signal processing. Check loudness, true peak, and clipping instantly.",
   },
   alternates: {
     canonical: "/",
@@ -91,18 +86,12 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const websiteSchema = getWebSiteSchema();
   const orgSchema = getOrganizationSchema();
   const webAppSchema = getWebApplicationSchema();
 
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} dark antialiased`}>
       <head>
-        <script
-          key="ld-json-website"
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema) }}
-        />
         <script
           key="ld-json-org"
           type="application/ld+json"
