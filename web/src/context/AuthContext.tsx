@@ -9,7 +9,7 @@ import {
   signOut as firebaseSignOut, 
   onAuthStateChanged 
 } from 'firebase/auth';
-import { auth, googleProvider } from '@/lib/firebase';
+import { auth, googleProvider, isFirebaseConfigured } from '@/lib/firebase';
 
 export interface SonichecksUser {
   uid: string;
@@ -55,29 +55,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (e) {}
 
-    // 2. Listen to Firebase auth state
+    // 2. Listen to Firebase auth state if configured
     let unsubscribe = () => {};
-    try {
-      unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-        if (firebaseUser) {
-          const u: SonichecksUser = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email,
-            displayName: firebaseUser.displayName,
-          };
-          setUser(u);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(u));
+    if (auth) {
+      try {
+        unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+          if (firebaseUser) {
+            const u: SonichecksUser = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              displayName: firebaseUser.displayName,
+            };
+            setUser(u);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(u));
+            }
+            setIsAuthModalOpen(false);
           }
-          setIsAuthModalOpen(false);
-        }
+          setLoading(false);
+        }, (error) => {
+          console.warn('Firebase Auth State listener notice:', error);
+          setLoading(false);
+        });
+      } catch (err) {
+        console.warn('Firebase Auth init notice:', err);
         setLoading(false);
-      }, (error) => {
-        console.warn('Firebase Auth State listener notice:', error);
-        setLoading(false);
-      });
-    } catch (err) {
-      console.warn('Firebase Auth init notice:', err);
+      }
+    } else {
       setLoading(false);
     }
 
@@ -117,6 +121,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
+    if (!auth) {
+      throw new Error('Firebase Auth is not configured. Please use Email Sign In.');
+    }
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (result.user) {
@@ -133,6 +140,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signInWithEmail = async (email: string, pass: string) => {
+    if (!auth) {
+      // Automatic instant fallback to local email session
+      await signInWithLocalEmail(email);
+      return;
+    }
     try {
       const result = await signInWithEmailAndPassword(auth, email, pass);
       if (result.user) {
@@ -149,6 +161,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUpWithEmail = async (email: string, pass: string) => {
+    if (!auth) {
+      // Automatic instant fallback to local email session
+      await signInWithLocalEmail(email);
+      return;
+    }
     try {
       const result = await createUserWithEmailAndPassword(auth, email, pass);
       if (result.user) {
@@ -178,9 +195,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(LOCAL_USER_KEY);
     }
-    try {
-      await firebaseSignOut(auth);
-    } catch (e) {}
+    if (auth) {
+      try {
+        await firebaseSignOut(auth);
+      } catch (e) {}
+    }
   };
 
   return (
