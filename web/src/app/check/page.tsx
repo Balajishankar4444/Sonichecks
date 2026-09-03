@@ -28,7 +28,7 @@ import BatchComparisonMatrix from '@/components/results/BatchComparisonMatrix';
 import UpgradePromptModal, { UpgradePromptState } from '@/components/common/UpgradePromptModal';
 import TierBadgeSelector from '@/components/common/TierBadgeSelector';
 import { BatchQCResult, FileQCResult, QCProfile, QCStatus } from '@/types/qc';
-import { getQCProfiles, analyzeBatchFiles, analyzeSingleFile } from '@/lib/api';
+import { getQCProfiles, DEFAULT_QC_PROFILES, analyzeBatchFiles, analyzeSingleFile } from '@/lib/api';
 import { saveBatchToHistory, getUsageState, UsageState } from '@/lib/storage';
 import { ProductTier, TIER_CONFIGS, getTierConfig } from '@/config/tiers';
 import { useAuth } from '@/context/AuthContext';
@@ -38,8 +38,8 @@ import { convertLocalMeasurementsToFileQCResult } from '@/lib/audio-engine/adapt
 export default function CheckPage() {
   const { user, openAuthModal } = useAuth();
   const [files, setFiles] = useState<File[]>([]);
-  const [profiles, setProfiles] = useState<QCProfile[]>([]);
-  const [selectedProfile, setSelectedProfile] = useState<QCProfile | null>(null);
+  const [profiles, setProfiles] = useState<QCProfile[]>(DEFAULT_QC_PROFILES);
+  const [selectedProfile, setSelectedProfile] = useState<QCProfile>(DEFAULT_QC_PROFILES[0]);
   const [engineMode, setEngineMode] = useState<AnalysisEngineMode>('LOCAL');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
