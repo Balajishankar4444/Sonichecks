@@ -36,8 +36,9 @@ export default function Footer() {
 
           {/* Standards & Guides */}
           <div>
-            <h4 className="font-semibold text-white mb-3 text-xs uppercase tracking-wider">QC Standards</h4>
+            <h4 className="font-semibold text-white mb-3 text-xs uppercase tracking-wider">QC Standards &amp; Guides</h4>
             <ul className="space-y-2 text-xs">
+              <li><Link href="/guide" className="text-cyan-400 font-semibold hover:text-cyan-300 transition-colors flex items-center gap-1">Audio QC Technical Guide &rarr;</Link></li>
               <li><Link href="/loudness-checker" className="hover:text-cyan-400 transition-colors">LUFS Loudness Specs</Link></li>
               <li><Link href="/wav-checker" className="hover:text-cyan-400 transition-colors">True Peak &amp; Sample Peak</Link></li>
               <li><Link href="/audio-file-validator" className="hover:text-cyan-400 transition-colors">Digital Clipping Detection</Link></li>
