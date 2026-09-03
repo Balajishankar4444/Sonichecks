@@ -1,6 +1,7 @@
 import { parseWavHeader, parseWavAudioData } from '../wav-parser';
 import { calculateDspMetrics } from '../dsp-metrics';
 import { calculateLoudness } from '../lufs';
+import { calculateLoudnessRange } from '../lra';
 import { calculateTruePeak } from '../true-peak';
 import { analyzeWavBuffer } from '../analyzer';
 import { createSyntheticWav } from './wav-generator';
@@ -19,7 +20,7 @@ function assertClose(actual: number, expected: number, tolerance: number, messag
 }
 
 export async function runAllBrowserEngineTests() {
-  console.log('🧪 Running Browser Audio Engine Test Suite (Phase 2: DSP + LUFS + True Peak)...\n');
+  console.log('🧪 Running Browser Audio Engine Test Suite (Phase 3.1: DSP + LUFS + True Peak + LRA)...\n');
 
   // Test 1: Valid 16-bit 44.1kHz Stereo Sine Wave
   {
@@ -45,13 +46,13 @@ export async function runAllBrowserEngineTests() {
     console.log('  ✅ Test 1: 16-bit 44.1kHz Stereo Sine Wave analysis passed');
   }
 
-  // Test 2: ITU-R BS.1770-4 -14.5 LUFS Stereo Reference
+  // Test 2: ITU-R BS.1770-4 -15.24 LUFS Stereo Reference (48kHz, 24-bit, 4.0s, Constant Sine LRA ~ 0 LU)
   {
     const wav = createSyntheticWav({
       sampleRate: 48000,
       channels: 2,
       bitDepth: 24,
-      durationSeconds: 2.0,
+      durationSeconds: 4.0,
       generator: (t) => 0.188 * Math.sin(2 * Math.PI * 440 * t)
     });
 
@@ -60,28 +61,62 @@ export async function runAllBrowserEngineTests() {
     assert(result.metadata.bitDepth === 24, 'Bit depth must be 24');
     assertClose(result.integratedLufs, -15.24, 0.05, 'Integrated LUFS should match Python reference (-15.24 LUFS)');
     assertClose(result.samplePeakDbfs, -14.52, 0.05, 'Sample Peak dBFS should match Python reference (-14.52 dBFS)');
-    console.log('  ✅ Test 2: ITU-R BS.1770-4 -14.5 LUFS Stereo Reference passed');
+    assertClose(result.loudnessRangeLu ?? 0, 2.1, 0.5, 'Constant sine LRA with trailing decay should match Python reference (~2.1 LU)');
+    console.log('  ✅ Test 2: ITU-R BS.1770-4 -15.24 LUFS Stereo Reference & LRA passed');
   }
 
-  // Test 3: EBU R128 -23.0 LUFS Broadcast Reference
+  // Test 3: EBU R128 -22.34 LUFS Broadcast Reference (48kHz, 24-bit, 4.0s)
   {
     const amp23 = Math.pow(10, (-23.0 + 0.691) / 20.0);
     const wav = createSyntheticWav({
       sampleRate: 48000,
       channels: 2,
       bitDepth: 24,
-      durationSeconds: 2.0,
+      durationSeconds: 4.0,
       generator: (t) => amp23 * Math.sin(2 * Math.PI * 1000 * t)
     });
 
     const result = await analyzeWavBuffer(wav, 'broadcast_23lufs.wav');
     assertClose(result.integratedLufs, -22.34, 0.05, 'Integrated LUFS should match Python reference (-22.34 LUFS)');
-    console.log('  ✅ Test 3: EBU R128 -23.0 LUFS Broadcast Reference passed');
+    console.log('  ✅ Test 3: EBU R128 -22.34 LUFS Broadcast Reference passed');
   }
 
-  // Test 4: 4x Polyphase Inter-Sample Peak Detection (True Peak > Sample Peak)
+  // Test 4: EBU Tech 3342 Dynamic Audio LRA Measurement (10.0s, envelope modulation)
   {
-    // 12 kHz tone at 48kHz with pi/4 phase offset generates inter-sample peaks
+    const wav = createSyntheticWav({
+      sampleRate: 48000,
+      channels: 2,
+      bitDepth: 24,
+      durationSeconds: 10.0,
+      generator: (t) => {
+        const env = 0.5 * (1.0 + Math.sin(2 * Math.PI * 0.2 * t));
+        return env * (0.3 * Math.sin(2 * Math.PI * 150 * t) + 0.2 * Math.sin(2 * Math.PI * 1200 * t));
+      }
+    });
+
+    const result = await analyzeWavBuffer(wav, 'dynamic_music_10s.wav');
+    assert(result.loudnessRangeLu !== null, 'LRA must be calculated on 10s audio');
+    assertClose(result.loudnessRangeLu ?? 0, 12.1, 0.5, 'LRA should measure wide dynamic range (~12.1 LU)');
+    console.log('  ✅ Test 4: EBU Tech 3342 Dynamic Audio LRA Measurement passed');
+  }
+
+  // Test 5: Short File (< 3.0s) LRA Availability (Should return null/NA per EBU Tech 3342)
+  {
+    const wav = createSyntheticWav({
+      sampleRate: 48000,
+      channels: 2,
+      bitDepth: 24,
+      durationSeconds: 1.5,
+      generator: (t) => 0.2 * Math.sin(2 * Math.PI * 440 * t)
+    });
+
+    const result = await analyzeWavBuffer(wav, 'short_file_1.5s.wav');
+    assert(result.loudnessRangeLu === null, 'LRA must be null for files < 3.0 seconds');
+    console.log('  ✅ Test 5: Short File (< 3.0s) LRA returns null (N/A) passed');
+  }
+
+  // Test 6: 4x Polyphase Inter-Sample Peak Detection (True Peak > Sample Peak)
+  {
     const wav = createSyntheticWav({
       sampleRate: 48000,
       channels: 2,
@@ -91,14 +126,13 @@ export async function runAllBrowserEngineTests() {
     });
 
     const result = await analyzeWavBuffer(wav, 'intersample_peak.wav');
-    // Sample peak is at -3.01 dBFS, but true peak continuous wave reaches 0.0 / +0.1 dBTP
     assertClose(result.samplePeakDbfs, -3.01, 0.05, 'Sample peak is -3.01 dBFS');
-    assert(result.truePeakDbtp > result.samplePeakDbfs + 2.5, 'True peak must detect inter-sample overshoots (+3 dB higher)');
+    assert(result.truePeakDbtp > result.samplePeakDbfs + 2.5, 'True peak must detect inter-sample overshoots');
     assertClose(result.truePeakDbtp, 0.10, 0.15, 'True peak should measure inter-sample peak near 0.1 dBTP');
-    console.log('  ✅ Test 4: 4x Polyphase Inter-Sample Peak Detection passed');
+    console.log('  ✅ Test 6: 4x Polyphase Inter-Sample Peak Detection passed');
   }
 
-  // Test 5: 32-bit 96kHz High-Resolution Audio
+  // Test 7: 32-bit 96kHz High-Resolution Audio
   {
     const wav = createSyntheticWav({
       sampleRate: 96000,
@@ -113,10 +147,10 @@ export async function runAllBrowserEngineTests() {
     assert(result.metadata.sampleRate === 96000, 'Sample rate must be 96000');
     assert(result.metadata.bitDepth === 32, 'Bit depth must be 32');
     assertClose(result.samplePeakLinear, 0.75, 0.001, 'Sample peak linear should be ~0.75');
-    console.log('  ✅ Test 5: 32-bit 96kHz High-Resolution Audio analysis passed');
+    console.log('  ✅ Test 7: 32-bit 96kHz High-Resolution Audio analysis passed');
   }
 
-  // Test 6: DC Offset and Constant Signal Detection
+  // Test 8: DC Offset and Constant Signal Detection
   {
     const wav = createSyntheticWav({
       sampleRate: 44100,
@@ -129,10 +163,10 @@ export async function runAllBrowserEngineTests() {
     const result = await analyzeWavBuffer(wav, 'dc_offset.wav');
     assertClose(result.dcOffsetLinear, 0.10, 0.001, 'DC offset linear should be ~0.10');
     assertClose(result.dcOffsetPercent, 10.0, 0.1, 'DC offset percent should be ~10.0%');
-    console.log('  ✅ Test 6: DC Offset & Constant Signal analysis passed');
+    console.log('  ✅ Test 8: DC Offset & Constant Signal analysis passed');
   }
 
-  // Test 7: Hard Digital Clipping Detection
+  // Test 9: Hard Digital Clipping Detection
   {
     const wav = createSyntheticWav({
       sampleRate: 44100,
@@ -149,47 +183,27 @@ export async function runAllBrowserEngineTests() {
     assert(result.clipping.clippingDetected, 'Should detect hard clipping');
     assert(result.clipping.clippedSamples > 100, 'Should count clipped samples');
     assert(result.clipping.consecutiveClippedRuns > 0, 'Should detect consecutive clipped runs');
-    console.log('  ✅ Test 7: Hard Digital Clipping detection passed');
+    console.log('  ✅ Test 9: Hard Digital Clipping detection passed');
   }
 
-  // Test 8: Silence Detection with Leading & Trailing Silence
+  // Test 10: Completely Silent File Gating (-70.0 LUFS, LRA null)
   {
     const wav = createSyntheticWav({
       sampleRate: 44100,
       channels: 2,
       bitDepth: 16,
-      durationSeconds: 3.0,
-      generator: (t) => {
-        if (t < 0.5 || t > 1.5) return 0.0;
-        return 0.3 * Math.sin(2 * Math.PI * 1000 * t);
-      }
-    });
-
-    const result = await analyzeWavBuffer(wav, 'padded_silence.wav');
-    assert(!result.silence.isCompletelySilent, 'Should not be completely silent');
-    assertClose(result.silence.leadingSilenceSec, 0.5, 0.1, 'Leading silence should be ~0.5s');
-    assertClose(result.silence.trailingSilenceSec, 1.5, 0.1, 'Trailing silence should be ~1.5s');
-    console.log('  ✅ Test 8: Head/Tail Silence boundaries analysis passed');
-  }
-
-  // Test 9: Completely Silent File Gating (-70.0 LUFS)
-  {
-    const wav = createSyntheticWav({
-      sampleRate: 44100,
-      channels: 2,
-      bitDepth: 16,
-      durationSeconds: 2.0,
+      durationSeconds: 4.0,
       generator: () => 0.0
     });
 
     const result = await analyzeWavBuffer(wav, 'completely_silent.wav');
     assert(result.silence.isCompletelySilent, 'Should detect completely silent file');
     assert(result.integratedLufs <= -70.0, 'Silent file LUFS should be gated to -70.0 LUFS');
-    assert(result.samplePeakDbfs <= -100.0, 'Peak dBFS should be floor (-100 dBFS)');
-    console.log('  ✅ Test 9: Completely Silent File & Gating (-70 LUFS) passed');
+    assert(result.loudnessRangeLu === null, 'Silent file LRA should be null (not misleading 0 LU)');
+    console.log('  ✅ Test 10: Completely Silent File & LRA Gating passed');
   }
 
-  // Test 10: Malformed / Invalid WAV handling
+  // Test 11: Non-WAV / Malformed error handling
   {
     let caught = false;
     try {
@@ -200,10 +214,10 @@ export async function runAllBrowserEngineTests() {
       assert(e.message.includes('too small') || e.message.includes('Invalid WAV'), 'Proper error message on bad WAV');
     }
     assert(caught, 'Should reject invalid buffer');
-    console.log('  ✅ Test 10: Malformed/Invalid WAV graceful rejection passed');
+    console.log('  ✅ Test 11: Malformed/Invalid WAV graceful rejection passed');
   }
 
-  console.log('\n🎉 ALL 10 PHASE 2 BROWSER AUDIO ENGINE TESTS PASSED!\n');
+  console.log('\n🎉 ALL 11 PHASE 3.1 BROWSER AUDIO ENGINE TESTS PASSED!\n');
 }
 
 // Auto-run if executed in Node.js

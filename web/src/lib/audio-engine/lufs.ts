@@ -1,8 +1,10 @@
 /**
- * ITU-R BS.1770-4 Loudness Measurement Engine
+ * ITU-R BS.1770-4 Loudness Measurement Engine & EBU Tech 3342 Loudness Range (LRA)
  * Exactly reproduces pyloudnorm / ITU-R BS.1770-4 K-weighting, 400ms blocks, 75% overlap,
- * absolute gating (-70 LKFS) and relative gating (-10 LU).
+ * absolute gating (-70 LKFS), relative gating (-10 LU), and EBU Tech 3342 LRA.
  */
+
+import { calculateLoudnessRange, ShortTermPoint } from './lra';
 
 export interface BiquadCoeffs {
   b0: number;
@@ -17,6 +19,7 @@ export interface LoudnessMeasurements {
   momentaryMaxLufs: number | null;
   shortTermMaxLufs: number | null;
   loudnessRangeLu: number | null;
+  shortTermTimeline?: ShortTermPoint[];
 }
 
 /**
@@ -103,7 +106,6 @@ export function applyKWeighting(
   const filteredChannels: Float32Array[] = [];
 
   for (let ch = 0; ch < channels.length; ch++) {
-    // Clone channel data so original is not mutated
     const chData = new Float32Array(channels[ch]);
     applyIirFilterInPlace(chData, highShelf);
     applyIirFilterInPlace(chData, highPass);
@@ -123,12 +125,11 @@ function getChannelWeightings(numChannels: number): number[] {
     // L, R, C, Ls, Rs (and LFE if 6)
     return [1.0, 1.0, 1.0, 1.41, 1.41, 0.0];
   }
-  // Default equal weighting
   return new Array(numChannels).fill(1.0);
 }
 
 /**
- * Calculate ITU-R BS.1770-4 Integrated LUFS, Momentary Max, and Short-term Max.
+ * Calculate ITU-R BS.1770-4 Integrated LUFS, Momentary Max, Short-term Max, and EBU Tech 3342 LRA.
  */
 export function calculateLoudness(
   channels: Float32Array[],
@@ -140,7 +141,7 @@ export function calculateLoudness(
       integratedLufs: -70.0,
       momentaryMaxLufs: -70.0,
       shortTermMaxLufs: -70.0,
-      loudnessRangeLu: 0.0
+      loudnessRangeLu: null
     };
   }
 
@@ -152,7 +153,7 @@ export function calculateLoudness(
       integratedLufs: -70.0,
       momentaryMaxLufs: -70.0,
       shortTermMaxLufs: -70.0,
-      loudnessRangeLu: 0.0
+      loudnessRangeLu: null
     };
   }
 
@@ -169,7 +170,6 @@ export function calculateLoudness(
   const numBlocks = Math.floor(Math.round((duration - Tg) / (Tg * step))) + 1;
 
   if (numBlocks <= 0) {
-    // Duration is shorter than 400ms, compute direct un-gated loudness
     let sumWeightedSquares = 0.0;
     for (let ch = 0; ch < numChannels; ch++) {
       let sumSq = 0.0;
@@ -188,7 +188,7 @@ export function calculateLoudness(
       integratedLufs: lufsVal,
       momentaryMaxLufs: lufsVal,
       shortTermMaxLufs: lufsVal,
-      loudnessRangeLu: 0.0
+      loudnessRangeLu: null
     };
   }
 
@@ -240,7 +240,7 @@ export function calculateLoudness(
       integratedLufs: -70.0,
       momentaryMaxLufs: -70.0,
       shortTermMaxLufs: -70.0,
-      loudnessRangeLu: 0.0
+      loudnessRangeLu: null
     };
   }
 
@@ -295,42 +295,14 @@ export function calculateLoudness(
   }
   const momentaryMaxLufs = Math.max(-70.0, Math.round(momentaryMax * 100) / 100);
 
-  // 8. Short-term Max LUFS (3.0s window with 1.0s step)
-  let shortTermMaxLufs: number | null = null;
-  const stWinSamples = Math.floor(3.0 * sampleRate);
-  const stStepSamples = Math.floor(1.0 * sampleRate);
-
-  if (numSamples >= stWinSamples && stStepSamples > 0) {
-    let maxSt = -70.0;
-    const stValues: number[] = [];
-
-    for (let i = 0; i <= numSamples - stWinSamples; i += stStepSamples) {
-      let stWeightedSum = 0.0;
-      for (let ch = 0; ch < numChannels; ch++) {
-        const chData = filtered[ch];
-        let sumSq = 0.0;
-        for (let s = 0; s < stWinSamples; s++) {
-          const val = chData[i + s];
-          sumSq += val * val;
-        }
-        stWeightedSum += G[ch] * (sumSq / stWinSamples);
-      }
-      if (stWeightedSum > 1e-12) {
-        const stLufs = -0.691 + 10.0 * Math.log10(stWeightedSum);
-        stValues.push(stLufs);
-        if (stLufs > maxSt) maxSt = stLufs;
-      }
-    }
-
-    if (stValues.length > 0) {
-      shortTermMaxLufs = Math.max(-70.0, Math.round(maxSt * 100) / 100);
-    }
-  }
+  // 8. EBU Tech 3342 Loudness Range & Short-term measurements
+  const lraMetrics = calculateLoudnessRange(filtered, sampleRate);
 
   return {
     integratedLufs,
     momentaryMaxLufs,
-    shortTermMaxLufs,
-    loudnessRangeLu: null
+    shortTermMaxLufs: lraMetrics.shortTermMaxLufs,
+    loudnessRangeLu: lraMetrics.loudnessRangeLu,
+    shortTermTimeline: lraMetrics.shortTermPoints
   };
 }

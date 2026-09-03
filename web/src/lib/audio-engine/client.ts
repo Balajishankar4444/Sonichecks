@@ -9,6 +9,13 @@ export async function analyzeWavFileLocally(
   file: File,
   onProgress?: LocalAnalysisProgressCallback
 ): Promise<LocalAudioMeasurements> {
+  // If file is not WAV/RIFF, provide a clear friendly error
+  if (!file.name.toLowerCase().endsWith('.wav')) {
+    throw new Error(
+      `Browser analysis currently supports WAV files. "${file.name}" requires Python Reference Engine processing.`
+    );
+  }
+
   // If Web Worker is supported in browser
   if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
     try {
@@ -28,7 +35,7 @@ export async function analyzeWavFileLocally(
         PARSING_WAV: 'Parsing WAV header & PCM audio streams...',
         HASHING_FILE: 'Calculating cryptographic SHA-256 hash...',
         ANALYZING_METRICS: 'Calculating DSP sample peaks, RMS energy, DC offset, clipping & silence...',
-        ANALYZING_LUFS: 'Measuring ITU-R BS.1770-4 K-weighted Integrated LUFS...',
+        ANALYZING_LUFS: 'Measuring ITU-R BS.1770-4 Integrated LUFS & EBU Tech 3342 LRA...',
         ANALYZING_TRUE_PEAK: 'Calculating 4x oversampled polyphase True Peak (dBTP)...',
         COMPLETE: 'Local analysis complete.'
       };
@@ -57,7 +64,9 @@ function analyzeWithWorker(
             
             const view = new DataView(buffer);
             const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
-            if (riff !== 'RIFF') throw new Error('Invalid WAV file (not RIFF)');
+            if (riff !== 'RIFF') {
+              throw new Error('Browser analysis currently supports WAV files. This file will need to use the Python Reference Engine.');
+            }
             
             let offset = 12;
             let audioFormat = 1, channels = 2, sampleRate = 44100, bitDepth = 16;
@@ -80,7 +89,7 @@ function analyzeWithWorker(
               offset += 8 + chunkSize + (chunkSize % 2);
             }
 
-            if (!dataOffset) throw new Error('Missing data chunk in WAV');
+            if (!dataOffset) throw new Error('Missing data chunk in WAV file');
 
             const bytesPerSample = bitDepth / 8;
             const numSamples = Math.floor(dataSize / (channels * bytesPerSample));
@@ -210,7 +219,7 @@ function analyzeWithWorker(
             }
 
             // === ITU-R BS.1770-4 LUFS Calculation ===
-            self.postMessage({ type: 'PROGRESS', stage: 'ANALYZING_LUFS', message: 'Measuring ITU-R BS.1770-4 Integrated LUFS...', progressPercent: 65 });
+            self.postMessage({ type: 'PROGRESS', stage: 'ANALYZING_LUFS', message: 'Measuring Integrated LUFS & EBU Tech 3342 LRA...', progressPercent: 65 });
             
             // K-weighting filter coefficients
             const G_hs = 4.0, Q_hs = 1.0 / Math.SQRT2, fc_hs = 1500.0;
@@ -240,7 +249,6 @@ function analyzeWithWorker(
             for (let c = 0; c < channels; c++) {
               const src = channelBuffers[c];
               const f = new Float32Array(numSamples);
-              // Apply High-Shelf
               let d0 = 0, d1 = 0;
               for (let i = 0; i < numSamples; i++) {
                 const x = src[i];
@@ -249,7 +257,6 @@ function analyzeWithWorker(
                 d1 = hs_b2 * x - hs_a2 * y;
                 f[i] = y;
               }
-              // Apply High-Pass RLB
               d0 = 0; d1 = 0;
               for (let i = 0; i < numSamples; i++) {
                 const x = f[i];
@@ -261,7 +268,7 @@ function analyzeWithWorker(
               filteredChannels.push(f);
             }
 
-            // Gating calculation
+            // Gating calculation for Integrated LUFS (400ms blocks, 75% overlap)
             const G = channels === 1 ? [1.0] : channels === 2 ? [1.0, 1.0] : new Array(channels).fill(1.0);
             const Tg = 0.4, step = 0.25;
             const numBlocks = Math.floor(Math.round((durationSeconds - Tg) / (Tg * step))) + 1;
@@ -326,13 +333,78 @@ function analyzeWithWorker(
               }
             }
 
+            // === EBU Tech 3342 Loudness Range (LRA) Calculation ===
+            let loudnessRangeLu = null;
+            let shortTermMaxLufs = null;
+
+            if (durationSeconds >= 3.0 && integratedLufs > -70.0) {
+              const T_st = 3.0;
+              const stBlockSamples = Math.floor(T_st * sampleRate);
+              const stOverlap = 0.97;
+              const stStepRatio = 1.0 - stOverlap; // 0.03 * 3.0s = 0.09s
+              const stStepSamples = Math.floor(T_st * stStepRatio * sampleRate);
+              const totalStSamples = numSamples + Math.floor(1.5 * sampleRate); // 1.5s trailing silence
+              const numStBlocks = Math.floor(Math.round((totalStSamples - stBlockSamples) / (T_st * stStepRatio * sampleRate))) + 1;
+
+              const stLoudnessList = [];
+              let maxStLufs = -100.0;
+
+              for (let j = 0; j < numStBlocks; j++) {
+                const l = j * stStepSamples;
+                const u = l + stBlockSamples;
+                let sumWeighted = 0.0;
+
+                const validEnd = Math.min(u, numSamples);
+                const validStart = Math.min(l, numSamples);
+
+                for (let c = 0; c < channels; c++) {
+                  const chData = filteredChannels[c];
+                  let sumSq = 0.0;
+                  for (let s = validStart; s < validEnd; s++) {
+                    const v = chData[s];
+                    sumSq += v * v;
+                  }
+                  sumWeighted += G[c] * (sumSq / stBlockSamples);
+                }
+
+                const stVal = sumWeighted > 1e-12 ? -0.691 + 10.0 * Math.log10(sumWeighted) : -100.0;
+                stLoudnessList.push(stVal);
+                if (stVal > maxStLufs) maxStLufs = stVal;
+              }
+
+              if (maxStLufs > -100.0) {
+                shortTermMaxLufs = Math.round(maxStLufs * 100) / 100;
+              }
+
+              // Gating for LRA
+              const absGatedLra = stLoudnessList.filter(x => x >= -70.0);
+              if (absGatedLra.length > 0) {
+                let sumPower = 0.0;
+                for (let k = 0; k < absGatedLra.length; k++) sumPower += Math.pow(10.0, absGatedLra[k] / 10.0);
+                const stlRef = 10.0 * Math.log10(sumPower / absGatedLra.length);
+                const gammaLra = stlRef - 20.0;
+
+                const relGatedLra = absGatedLra.filter(x => x >= gammaLra);
+                if (relGatedLra.length >= 2) {
+                  relGatedLra.sort((a, b) => a - b);
+                  const getP = (arr, p) => {
+                    const r = (p / 100.0) * (arr.length - 1);
+                    const lo = Math.floor(r), hi = Math.ceil(r), w = r - lo;
+                    return arr[lo] * (1.0 - w) + arr[hi] * w;
+                  };
+                  const p10 = getP(relGatedLra, 10);
+                  const p95 = getP(relGatedLra, 95);
+                  loudnessRangeLu = Math.round(Math.max(0.0, p95 - p10) * 10) / 10;
+                }
+              }
+            }
+
             // === True Peak (4x Polyphase Interpolation) ===
             self.postMessage({ type: 'PROGRESS', stage: 'ANALYZING_TRUE_PEAK', message: 'Calculating 4x oversampled polyphase True Peak (dBTP)...', progressPercent: 85 });
             let maxTruePeak = globalPeakLinear;
             const upFactor = sampleRate > 96000 ? 1 : sampleRate > 48000 ? 2 : 4;
 
             if (upFactor > 1) {
-              // 4x polyphase sinc filter (halfTaps = 12)
               const halfTaps = 12, numTaps = 24;
               for (let c = 0; c < channels; c++) {
                 const d = channelBuffers[c];
@@ -342,7 +414,6 @@ function analyzeWithWorker(
                   if (a0 < maxTruePeak * 0.7 && i > 0 && i < numSamples - 1) {
                     if (Math.abs(d[i-1]) < maxTruePeak * 0.7 && Math.abs(d[i+1]) < maxTruePeak * 0.7) continue;
                   }
-                  // Sub-phase sinc interpolation at +0.25, +0.5, +0.75
                   for (let p = 1; p < upFactor; p++) {
                     const offset = p / upFactor;
                     let interp = 0.0;
@@ -396,8 +467,8 @@ function analyzeWithWorker(
               },
               integratedLufs: Math.max(-70.0, integratedLufs),
               momentaryMaxLufs: Math.max(-70.0, Math.round(momentaryMaxLufs * 100) / 100),
-              shortTermMaxLufs: null,
-              loudnessRangeLu: null,
+              shortTermMaxLufs: shortTermMaxLufs !== null ? Math.max(-70.0, shortTermMaxLufs) : null,
+              loudnessRangeLu,
               samplePeakLinear: Math.round(globalPeakLinear * 100000) / 100000,
               samplePeakDbfs: globalPeakLinear > 1e-6 ? Math.round(20 * Math.log10(globalPeakLinear) * 100) / 100 : -100.0,
               truePeakLinear,

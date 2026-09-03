@@ -108,7 +108,19 @@ export function convertLocalMeasurementsToFileQCResult(
     });
   }
 
-  // 5. True Peak Level (dBTP 4x Oversampled)
+  // 5. Loudness Range (LRA) Descriptive Check
+  if (loudnessRangeLu !== null && loudnessRangeLu !== undefined) {
+    checks.push({
+      name: 'Loudness Range (LRA)',
+      status: 'PASS',
+      value: `${loudnessRangeLu.toFixed(1)} LU`,
+      limit: 'EBU Tech 3342',
+      unit: 'LU',
+      message: `Dynamic loudness range is ${loudnessRangeLu.toFixed(1)} LU (Short-term Max: ${shortTermMaxLufs ? `${shortTermMaxLufs.toFixed(1)} LUFS` : 'N/A'}).`
+    });
+  }
+
+  // 6. True Peak Level (dBTP 4x Oversampled)
   const maxTruePeak = rules.max_true_peak_dbtp ?? -1.0;
   const isTruePeakOk = truePeakDbtp <= maxTruePeak + 0.05;
   const truePeakStatus: QCStatus = isTruePeakOk ? 'PASS' : (truePeakDbtp > 0.0 ? 'FAIL' : 'WARNING');
