@@ -2,14 +2,17 @@ from typing import List, Dict, Any
 from ..models.results import FileQCResult, ConsistencyIssue, QCStatus
 
 def check_batch_consistency(results: List[FileQCResult]) -> List[ConsistencyIssue]:
-    if len(results) <= 1:
+    # Filter only successfully analyzed files for consistency check
+    valid_results = [r for r in results if r.file_info is not None and r.overall_status != QCStatus.ERROR]
+    
+    if len(valid_results) <= 1:
         return []
 
     issues: List[ConsistencyIssue] = []
 
     # 1. Sample Rate Consistency
     sample_rates: Dict[int, List[str]] = {}
-    for r in results:
+    for r in valid_results:
         sr = r.file_info.sample_rate
         sample_rates.setdefault(sr, []).append(r.filename)
 
@@ -24,7 +27,7 @@ def check_batch_consistency(results: List[FileQCResult]) -> List[ConsistencyIssu
 
     # 2. Bit Depth Consistency
     bit_depths: Dict[Any, List[str]] = {}
-    for r in results:
+    for r in valid_results:
         bd = r.file_info.bit_depth
         bd_key = f"{bd}-bit" if bd else "Compressed/Unknown"
         bit_depths.setdefault(bd_key, []).append(r.filename)
@@ -40,7 +43,7 @@ def check_batch_consistency(results: List[FileQCResult]) -> List[ConsistencyIssu
 
     # 3. Channel Layout Consistency
     channel_layouts: Dict[str, List[str]] = {}
-    for r in results:
+    for r in valid_results:
         cl = r.file_info.channel_layout
         channel_layouts.setdefault(cl, []).append(r.filename)
 
@@ -54,7 +57,11 @@ def check_batch_consistency(results: List[FileQCResult]) -> List[ConsistencyIssu
         ))
 
     # 4. Loudness Uniformity
-    valid_lufs = [(r.filename, r.loudness.integrated_lufs) for r in results if r.loudness.integrated_lufs is not None and r.loudness.integrated_lufs > -60.0]
+    valid_lufs = [
+        (r.filename, r.loudness.integrated_lufs) 
+        for r in valid_results 
+        if r.loudness is not None and r.loudness.integrated_lufs is not None and r.loudness.integrated_lufs > -60.0
+    ]
     if len(valid_lufs) > 1:
         lufs_values = [l for _, l in valid_lufs]
         min_lufs = min(lufs_values)

@@ -144,48 +144,53 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
     for f in batch_result.files:
         f_color = "#059669" if f.overall_status == QCStatus.PASS else ("#d97706" if f.overall_status == QCStatus.WARNING else "#dc2626")
         
-        # File Header Row
-        file_header = [
-            Paragraph(f"<b>{f.filename}</b> ({f.file_info.format} &bull; {f.file_info.sample_rate/1000}kHz &bull; {f.file_info.bit_depth or 'N/A'}-bit &bull; {f.file_info.channel_layout})", cell_bold),
-            Paragraph(f"<font color='{f_color}'><b>{f.overall_status.value}</b></font>", ParagraphStyle('RightStatus', parent=cell_bold, alignment=2))
-        ]
-        
-        # Metrics Table
-        metrics_rows = [
-            [
-                Paragraph("<b>Integrated Loudness</b>", cell_style),
-                Paragraph(f"{f.loudness.integrated_lufs} LUFS" if f.loudness.integrated_lufs is not None else "N/A", cell_style),
-                Paragraph("<b>True Peak</b>", cell_style),
-                Paragraph(f"{f.peaks.true_peak_dbtp} dBTP", cell_style),
-            ],
-            [
-                Paragraph("<b>Sample Peak</b>", cell_style),
-                Paragraph(f"{f.peaks.sample_peak_dbfs} dBFS", cell_style),
-                Paragraph("<b>Clipping</b>", cell_style),
-                Paragraph(f"{'Detected (' + str(f.clipping.clipped_samples) + ' smp)' if f.clipping.clipping_detected else 'None'}", cell_style),
-            ],
-            [
-                Paragraph("<b>Head / Tail Silence</b>", cell_style),
-                Paragraph(f"{f.silence.leading_silence_sec}s / {f.silence.trailing_silence_sec}s", cell_style),
-                Paragraph("<b>Duration</b>", cell_style),
-                Paragraph(f"{round(f.file_info.duration_seconds, 2)}s", cell_style),
+        if f.file_info is not None:
+            file_header = [
+                Paragraph(f"<b>{f.filename}</b> ({f.file_info.format} &bull; {f.file_info.sample_rate/1000}kHz &bull; {f.file_info.bit_depth or 'N/A'}-bit &bull; {f.file_info.channel_layout})", cell_bold),
+                Paragraph(f"<font color='{f_color}'><b>{f.overall_status.value}</b></font>", ParagraphStyle('RightStatus', parent=cell_bold, alignment=2))
             ]
-        ]
-        
-        # Fix recommendations if any
-        if f.fix_summary:
-            fixes_text = "<br/>".join([f"&bull; {fix}" for fix in f.fix_summary])
-            metrics_rows.append([
-                Paragraph("<font color='#dc2626'><b>Required Actions:</b></font>", cell_style),
-                Paragraph(f"<font color='#dc2626'>{fixes_text}</font>", cell_style),
-                "", ""
-            ])
+            
+            metrics_rows = [
+                [
+                    Paragraph("<b>Integrated Loudness</b>", cell_style),
+                    Paragraph(f"{f.loudness.integrated_lufs} LUFS" if f.loudness and f.loudness.integrated_lufs is not None else "N/A", cell_style),
+                    Paragraph("<b>True Peak</b>", cell_style),
+                    Paragraph(f"{f.peaks.true_peak_dbtp} dBTP" if f.peaks else "N/A", cell_style),
+                ],
+                [
+                    Paragraph("<b>Sample Peak</b>", cell_style),
+                    Paragraph(f"{f.peaks.sample_peak_dbfs} dBFS" if f.peaks else "N/A", cell_style),
+                    Paragraph("<b>Clipping</b>", cell_style),
+                    Paragraph(f"{'Detected (' + str(f.clipping.clipped_samples) + ' smp)' if f.clipping and f.clipping.clipping_detected else 'None'}", cell_style),
+                ],
+                [
+                    Paragraph("<b>Head / Tail Silence</b>", cell_style),
+                    Paragraph(f"{f.silence.leading_silence_sec}s / {f.silence.trailing_silence_sec}s" if f.silence else "N/A", cell_style),
+                    Paragraph("<b>Duration</b>", cell_style),
+                    Paragraph(f"{round(f.file_info.duration_seconds, 2)}s", cell_style),
+                ]
+            ]
+            
+            if f.fix_summary:
+                fixes_text = "<br/>".join([f"&bull; {fix}" for fix in f.fix_summary])
+                metrics_rows.append([
+                    Paragraph("<font color='#dc2626'><b>Required Actions:</b></font>", cell_style),
+                    Paragraph(f"<font color='#dc2626'>{fixes_text}</font>", cell_style),
+                    "", ""
+                ])
+        else:
+            file_header = [
+                Paragraph(f"<b>{f.filename}</b> (Error reading file)", cell_bold),
+                Paragraph(f"<font color='{f_color}'><b>{f.overall_status.value}</b></font>", ParagraphStyle('RightStatus', parent=cell_bold, alignment=2))
+            ]
+            metrics_rows = [
+                [
+                    Paragraph("<font color='#dc2626'><b>Error Detail:</b></font>", cell_style),
+                    Paragraph(f"<font color='#dc2626'>{f.error_message or 'Unable to analyze file.'}</font>", cell_style),
+                    "", ""
+                ]
+            ]
 
-        full_card_data = [
-            file_header,
-            [Table(metrics_rows, colWidths=[120, 140, 120, 140]), ""]
-        ]
-        
         card_table = Table(
             [
                 file_header,

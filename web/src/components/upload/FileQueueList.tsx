@@ -1,12 +1,14 @@
 'use client';
 
 import React from 'react';
-import { FileAudio, Trash2, ShieldCheck, Sparkles, X, Layers } from 'lucide-react';
+import { FileAudio, Trash2, ShieldCheck, Sparkles, X, Layers, AlertTriangle } from 'lucide-react';
 import { QCProfile } from '@/types/qc';
+import { MAX_BATCH_SIZE } from '@/config/batch';
 
 interface FileQueueListProps {
   files: File[];
   onRemoveFile: (index: number) => void;
+  onRemoveDuplicates: () => void;
   onClearAll: () => void;
   onStartAnalysis: () => void;
   isAnalyzing: boolean;
@@ -26,6 +28,7 @@ function formatBytes(bytes: number): string {
 export default function FileQueueList({
   files,
   onRemoveFile,
+  onRemoveDuplicates,
   onClearAll,
   onStartAnalysis,
   isAnalyzing,
@@ -37,6 +40,13 @@ export default function FileQueueList({
 
   const totalSize = files.reduce((acc, f) => acc + f.size, 0);
 
+  // Check for duplicate filenames or identical (name+size)
+  const nameCounts: Record<string, number> = {};
+  files.forEach(f => {
+    nameCounts[f.name] = (nameCounts[f.name] || 0) + 1;
+  });
+  const duplicateNames = Object.keys(nameCounts).filter(name => nameCounts[name] > 1);
+
   return (
     <div className="w-full bg-slate-900/60 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5">
       {/* Header with counts and profile selector */}
@@ -44,15 +54,15 @@ export default function FileQueueList({
         <div>
           <h4 className="font-semibold text-white flex items-center gap-2 text-base">
             <Layers className="w-4 h-4 text-cyan-400" />
-            <span>Staged Audio Files ({files.length})</span>
+            <span>Staged Audio Files ({files.length} / {MAX_BATCH_SIZE})</span>
           </h4>
           <p className="text-xs text-slate-400 mt-0.5">
             Total size: {formatBytes(totalSize)}
           </p>
         </div>
 
-        {/* Profile Selector */}
-        <div className="flex items-center gap-2">
+        {/* Profile Selector & Clear */}
+        <div className="flex items-center gap-2 flex-wrap">
           <label className="text-xs font-medium text-slate-400">Profile:</label>
           <select
             value={selectedProfile.profile_id}
@@ -81,6 +91,26 @@ export default function FileQueueList({
         </div>
       </div>
 
+      {/* Duplicate Warning Banner */}
+      {duplicateNames.length > 0 && (
+        <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 text-amber-400 mt-0.5" />
+            <div>
+              <span className="font-bold">Duplicate file(s) detected: </span>
+              <span>{duplicateNames.slice(0, 3).join(', ')}{duplicateNames.length > 3 ? ` (+${duplicateNames.length - 3} more)` : ''} appears multiple times in the batch.</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onRemoveDuplicates}
+            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-semibold whitespace-nowrap self-start sm:self-auto transition-colors"
+          >
+            Remove Duplicates
+          </button>
+        </div>
+      )}
+
       {/* Profile Description Notice */}
       <div className="px-3.5 py-2.5 rounded-lg bg-cyan-950/30 border border-cyan-500/20 text-xs text-cyan-300 flex items-start gap-2">
         <Sparkles className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
@@ -93,19 +123,34 @@ export default function FileQueueList({
       <div className="max-h-72 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
         {files.map((file, idx) => {
           const ext = file.name.split('.').pop()?.toUpperCase() || 'AUDIO';
+          const isDuplicate = duplicateNames.includes(file.name);
+
           return (
             <div
-              key={`${file.name}-${idx}`}
-              className="flex items-center justify-between p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 hover:border-slate-700/80 transition-colors group"
+              key={`${file.name}-${idx}-${file.size}`}
+              className={`flex items-center justify-between p-3 rounded-xl border transition-colors group ${
+                isDuplicate 
+                  ? 'bg-amber-950/20 border-amber-500/30' 
+                  : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700/80'
+              }`}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-cyan-400 flex-shrink-0">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                  isDuplicate ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-cyan-400'
+                }`}>
                   <FileAudio className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-200 truncate group-hover:text-white transition-colors">
-                    {file.name}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-slate-200 truncate group-hover:text-white transition-colors">
+                      {file.name}
+                    </p>
+                    {isDuplicate && (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        Duplicate
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2 text-xs text-slate-400">
                     <span className="font-mono">{formatBytes(file.size)}</span>
                     <span>&bull;</span>
@@ -130,7 +175,7 @@ export default function FileQueueList({
         })}
       </div>
 
-      {/* Big Action Button */}
+      {/* Dynamic Action Button */}
       <div className="pt-2">
         <button
           type="button"
@@ -140,7 +185,7 @@ export default function FileQueueList({
         >
           <ShieldCheck className="w-5 h-5 stroke-[2.5]" />
           <span>
-            {files.length === 1 ? 'Analyze Audio File' : `Analyze ${files.length} Audio Files`}
+            {files.length === 1 ? 'Analyze 1 File' : `Analyze ${files.length} Files`}
           </span>
         </button>
       </div>

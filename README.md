@@ -1,7 +1,7 @@
 # 🎚️ Sonichecks — Audio Quality Control, Made Simple
 
 > **Deterministic Audio Quality Control SaaS**  
-> Inspect audio deliverables for LUFS loudness, true peaks, digital clipping, leading/trailing silence, sample rate & bit depth consistency, and delivery standards compliance.
+> Inspect single files or entire multi-track deliveries for LUFS loudness, true peaks, digital clipping, leading/trailing silence, sample rate & bit depth consistency, and delivery standards compliance.
 
 ---
 
@@ -9,18 +9,25 @@
 
 ```text
 Next.js 15+ App Router (localhost:3000)
-       ↓ (Multipart Audio Uploads)
+       ↓ (Multi-File / Batch Audio Uploads)
 FastAPI Python Microservice (localhost:8000)
        ↓
 SoundFile / FFmpeg / NumPy / pyloudnorm / SciPy
-       ↓
+       ↓ (Bounded Concurrency Worker Pool: 4 parallel workers)
 Deterministic QC Rules Engine (BS.1770-4 / EBU R128)
        ↓
-JSON Verdicts + Branded PDF Certificates + CSV Export
+JSON Verdicts + Filter/Search UI + PDF Certificates + CSV Export
 ```
 
 ### 🎯 Key Engineering Guarantees
 * **100% Deterministic DSP Analysis**: Pure digital signal processing calculations. No generative LLM hallucinations for audio properties.
+* **V1.1 Multi-File Batch Analysis**: Drag and drop up to **50 audio files** at once with dynamic `[ Analyze X Files ]` execution.
+* **Controlled Concurrency**: Bounded worker pool (`MAX_CONCURRENT_ANALYSES = 4`) ensures optimal CPU/RAM utilization without overloading the server.
+* **Batch Error Isolation**: If one audio file is corrupted or uses an unreadable codec, it does not crash or abort the remaining files in the batch.
+* **Live Per-File Progress & Cancel**: Real-time progress tracker (`18 / 32 files analyzed`), individual file status tags, and instant batch cancellation with partial results preservation.
+* **Single-File Retry**: Rerun analysis on a failed track without having to re-upload the entire batch.
+* **Filter, Search & Sort**: Filter by status (`All`, `Passed`, `Warnings`, `Failed`, `Errors`), search by filename, and sort by name, status, duration, loudness, or peak.
+* **Duplicate Detection**: Flags duplicate filenames in the staging queue with a 1-click `Remove Duplicates` action.
 * **ITU-R BS.1770-4 & EBU R128 Compliant**: Integrated LUFS, Short-term max, Momentary max, and Loudness Range (LRA).
 * **4x Polyphase True Peak Oversampling**: Inter-sample peaks accurately measured in dBTP.
 * **Hard Flat-Top Clipping Run Detection**: Detects consecutive full-scale samples hitting digital 0 dBFS.
@@ -101,6 +108,18 @@ Generated files are saved in `audio-engine/sample_audio/`:
 
 ---
 
+## ⚙️ Configuration Variables
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `MAX_BATCH_SIZE` | `50` | Maximum number of audio files allowed per upload batch. |
+| `MAX_CONCURRENT_ANALYSES` | `4` | Maximum parallel worker threads analyzing audio simultaneously. |
+| `MAX_FILE_SIZE_BYTES` | `262144000` | Maximum individual file size limit (250MB). |
+| `TEMP_UPLOAD_DIR` | `./tmp_uploads` | Isolated temporary storage directory (auto-purged). |
+| `NEXT_PUBLIC_AUDIO_ENGINE_URL` | `http://localhost:8000` | Audio engine microservice URL for Next.js. |
+
+---
+
 ## 📦 QC Delivery Profiles
 
 | Profile Name | Target LUFS | Max True Peak | Sample Rates | Bit Depths | Intended Delivery |
@@ -119,7 +138,7 @@ Generated files are saved in `audio-engine/sample_audio/`:
 Analyze a single audio file with multipart form data (`file`, `profile_id`).
 
 ### `POST /api/analyze/batch`
-Analyze multiple audio files concurrently (`files`, `profile_id`), calculate multi-track consistency issues, and produce global batch metrics.
+Analyze up to 50 audio files concurrently (`files`, `profile_id`) with bounded worker concurrency, individual file error isolation, cross-track consistency warnings, and aggregate batch statistics.
 
 ### `POST /api/export/pdf`
 Accepts `BatchQCResult` JSON body and returns a downloadable binary `application/pdf` quality control certificate.
@@ -133,10 +152,10 @@ Returns all active QC delivery profiles and threshold criteria.
 ---
 
 ## 🔒 Security Architecture
-- **MIME & Extension Whitelisting**: WAV, AIFF, FLAC, MP3 with strict header validation.
+- **MIME & Extension Whitelisting**: Strict extension and header checks.
 - **Subprocess Isolation**: Zero shell interpolation (`shell=False`) for FFmpeg/FFprobe invocations.
-- **Filename Sanitization**: Removal of directory traversal patterns, null bytes, and non-printable characters.
-- **Memory & Storage Quotas**: Chunked file streaming with hard 250MB per-file limits.
+- **Filename Sanitization**: Safe regex-based removal of path traversal and illegal characters.
+- **Immediate Ephemeral Deletion**: All uploaded files are guaranteed deletion via `finally` blocks.
 
 ---
 

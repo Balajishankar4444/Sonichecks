@@ -1,3 +1,4 @@
+import io
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from app.analyzer.silence import analyze_silence
 from app.analyzer.consistency import check_batch_consistency
 from app.analyzer.qc_engine import get_profile, evaluate_file_qc
 from app.models.results import QCStatus
+from app.config import MAX_BATCH_SIZE
 
 client = TestClient(app)
 
@@ -172,3 +174,38 @@ def test_api_batch_analyze_and_exports(clean_sine_wav: Path, clipped_wav: Path):
     assert "text/csv" in csv_resp.headers["content-type"]
     assert "track1.wav" in csv_resp.text
     assert "track2.wav" in csv_resp.text
+
+def test_batch_error_isolation_with_corrupted_file(clean_sine_wav: Path):
+    """Ensure that 1 corrupted file does not abort or crash the remaining batch."""
+    corrupted_bytes = b"RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00CORRUPTED_HEADER_DATA"
+    with open(clean_sine_wav, "rb") as f_valid:
+        response = client.post(
+            "/api/analyze/batch",
+            files=[
+                ("files", ("valid_track.wav", f_valid, "audio/wav")),
+                ("files", ("broken_corrupted.wav", io.BytesIO(corrupted_bytes), "audio/wav"))
+            ],
+            data={"profile_id": "standard"}
+        )
+    assert response.status_code == 200
+    batch_json = response.json()
+    assert batch_json["summary"]["total_files"] == 2
+    
+    valid_res = next(f for f in batch_json["files"] if f["filename"] == "valid_track.wav")
+    assert valid_res["overall_status"] in (QCStatus.PASS, QCStatus.WARNING)
+    assert valid_res["file_info"] is not None
+
+    broken_res = next(f for f in batch_json["files"] if f["filename"] == "broken_corrupted.wav")
+    assert broken_res["overall_status"] == QCStatus.ERROR
+    assert broken_res["error_message"] is not None
+    assert batch_json["summary"]["errors"] == 1
+
+def test_batch_size_limit():
+    """Ensure exceeding MAX_BATCH_SIZE is rejected cleanly."""
+    dummy_files = [
+        ("files", (f"file_{i}.wav", io.BytesIO(b"RIFFdummy"), "audio/wav"))
+        for i in range(MAX_BATCH_SIZE + 1)
+    ]
+    response = client.post("/api/analyze/batch", files=dummy_files)
+    assert response.status_code == 400
+    assert "Batch limit exceeded" in response.json()["detail"]

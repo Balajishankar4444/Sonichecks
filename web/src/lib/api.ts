@@ -85,9 +85,37 @@ export async function getQCProfiles(): Promise<QCProfile[]> {
   }
 }
 
+export async function analyzeSingleFile(
+  file: File,
+  profileId: string = 'standard',
+  signal?: AbortSignal
+): Promise<FileQCResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('profile_id', profileId);
+
+  const res = await fetch(`${AUDIO_ENGINE_URL}/api/analyze`, {
+    method: 'POST',
+    body: formData,
+    signal
+  });
+
+  if (!res.ok) {
+    let errorDetail = `Failed to analyze ${file.name}.`;
+    try {
+      const errJson = await res.json();
+      if (errJson.detail) errorDetail = errJson.detail;
+    } catch {}
+    throw new Error(errorDetail);
+  }
+
+  return await res.json();
+}
+
 export async function analyzeBatchFiles(
   files: File[],
-  profileId: string = 'standard'
+  profileId: string = 'standard',
+  signal?: AbortSignal
 ): Promise<BatchQCResult> {
   const formData = new FormData();
   files.forEach(file => {
@@ -98,6 +126,7 @@ export async function analyzeBatchFiles(
   const res = await fetch(`${AUDIO_ENGINE_URL}/api/analyze/batch`, {
     method: 'POST',
     body: formData,
+    signal
   });
 
   if (!res.ok) {

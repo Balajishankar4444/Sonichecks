@@ -6,6 +6,7 @@ class QCStatus(str, Enum):
     PASS = "PASS"
     WARNING = "WARNING"
     FAIL = "FAIL"
+    ERROR = "ERROR"
     NOT_CHECKED = "NOT_CHECKED"
 
 class AudioFileInfo(BaseModel):
@@ -58,14 +59,15 @@ class QCRuleCheck(BaseModel):
 class FileQCResult(BaseModel):
     file_id: str
     filename: str
-    file_info: AudioFileInfo
-    loudness: LoudnessResult
-    peaks: PeakResult
-    clipping: ClippingResult
-    silence: SilenceResult
-    checks: List[QCRuleCheck]
+    file_info: Optional[AudioFileInfo] = None
+    loudness: Optional[LoudnessResult] = None
+    peaks: Optional[PeakResult] = None
+    clipping: Optional[ClippingResult] = None
+    silence: Optional[SilenceResult] = None
+    checks: List[QCRuleCheck] = []
     overall_status: QCStatus
-    fix_summary: List[str]
+    fix_summary: List[str] = []
+    error_message: Optional[str] = None
 
 class ConsistencyIssue(BaseModel):
     metric: str
@@ -78,6 +80,7 @@ class BatchSummary(BaseModel):
     passed: int
     warnings: int
     failed: int
+    errors: int = 0
     avg_lufs: Optional[float] = None
     highest_true_peak_dbtp: Optional[float] = None
     total_duration_seconds: float

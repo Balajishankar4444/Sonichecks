@@ -1,4 +1,4 @@
-export type QCStatus = 'PASS' | 'WARNING' | 'FAIL' | 'NOT_CHECKED';
+export type QCStatus = 'PASS' | 'WARNING' | 'FAIL' | 'ERROR' | 'NOT_CHECKED';
 
 export interface AudioFileInfo {
   filename: string;
@@ -56,14 +56,15 @@ export interface QCRuleCheck {
 export interface FileQCResult {
   file_id: string;
   filename: string;
-  file_info: AudioFileInfo;
-  loudness: LoudnessResult;
-  peaks: PeakResult;
-  clipping: ClippingResult;
-  silence: SilenceResult;
+  file_info?: AudioFileInfo | null;
+  loudness?: LoudnessResult | null;
+  peaks?: PeakResult | null;
+  clipping?: ClippingResult | null;
+  silence?: SilenceResult | null;
   checks: QCRuleCheck[];
   overall_status: QCStatus;
   fix_summary: string[];
+  error_message?: string | null;
 }
 
 export interface ConsistencyIssue {
@@ -78,6 +79,7 @@ export interface BatchSummary {
   passed: number;
   warnings: number;
   failed: number;
+  errors: number;
   avg_lufs?: number | null;
   highest_true_peak_dbtp?: number | null;
   total_duration_seconds: number;

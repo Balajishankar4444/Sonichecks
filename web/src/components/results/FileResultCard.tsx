@@ -12,17 +12,21 @@ import {
   Sparkles, 
   Info,
   Wrench,
-  Volume2
+  Volume2,
+  RotateCcw,
+  Loader2
 } from 'lucide-react';
 import { FileQCResult, QCStatus } from '@/types/qc';
 
 interface FileResultCardProps {
   result: FileQCResult;
+  onRetry?: (filename: string) => void;
+  isRetrying?: boolean;
 }
 
-export default function FileResultCard({ result }: FileResultCardProps) {
+export default function FileResultCard({ result, onRetry, isRetrying = false }: FileResultCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const { filename, file_info, loudness, peaks, clipping, silence, checks, overall_status, fix_summary } = result;
+  const { filename, file_info, loudness, peaks, clipping, silence, checks, overall_status, fix_summary, error_message } = result;
 
   const getStatusBadge = (status: QCStatus) => {
     switch (status) {
@@ -30,14 +34,21 @@ export default function FileResultCard({ result }: FileResultCardProps) {
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-black uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>PASS</span>
+            <span>✓ PASS</span>
           </span>
         );
       case 'WARNING':
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-black uppercase tracking-wider bg-amber-500/10 border border-amber-500/30 text-amber-400">
             <AlertTriangle className="w-3.5 h-3.5" />
-            <span>WARNING</span>
+            <span>⚠ WARNING</span>
+          </span>
+        );
+      case 'ERROR':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-black uppercase tracking-wider bg-rose-500/20 border border-rose-500/40 text-rose-300">
+            <XCircle className="w-3.5 h-3.5" />
+            <span>❌ ERROR</span>
           </span>
         );
       case 'FAIL':
@@ -45,7 +56,7 @@ export default function FileResultCard({ result }: FileResultCardProps) {
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-black uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400">
             <XCircle className="w-3.5 h-3.5" />
-            <span>FAIL</span>
+            <span>✕ FAIL</span>
           </span>
         );
     }
@@ -57,11 +68,54 @@ export default function FileResultCard({ result }: FileResultCardProps) {
         return <span className="text-emerald-400 font-bold">✓</span>;
       case 'WARNING':
         return <span className="text-amber-400 font-bold">⚠</span>;
+      case 'ERROR':
       case 'FAIL':
       default:
         return <span className="text-rose-400 font-bold">✕</span>;
     }
   };
+
+  // Handle Errored / Corrupted File Card
+  if (overall_status === 'ERROR' || !file_info) {
+    return (
+      <div className="w-full rounded-2xl border border-rose-500/40 bg-rose-950/20 p-5 sm:p-6 space-y-4 shadow-lg transition-all">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center flex-shrink-0">
+              <XCircle className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base sm:text-lg font-bold text-white truncate">
+                {filename}
+              </h3>
+              <p className="text-xs text-rose-300/90 mt-0.5">
+                {error_message || 'Unable to analyze this file. The file may be corrupted or use an unsupported codec.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-start sm:self-center">
+            {getStatusBadge('ERROR')}
+            {onRetry && (
+              <button
+                type="button"
+                onClick={() => onRetry(filename)}
+                disabled={isRetrying}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition-colors disabled:opacity-50"
+              >
+                {isRetrying ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                ) : (
+                  <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
+                )}
+                <span>Retry</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const borderClass = overall_status === 'PASS' 
     ? 'border-slate-800 hover:border-emerald-500/40' 
@@ -102,6 +156,22 @@ export default function FileResultCard({ result }: FileResultCardProps) {
 
           <div className="flex items-center gap-3 self-start sm:self-center">
             {getStatusBadge(overall_status)}
+            {(overall_status === 'FAIL' || overall_status === 'WARNING') && onRetry && (
+              <button
+                type="button"
+                onClick={() => onRetry(filename)}
+                disabled={isRetrying}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-700 transition-colors disabled:opacity-50"
+                title="Retry single file analysis"
+              >
+                {isRetrying ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                ) : (
+                  <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
+                )}
+                <span>Retry</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -131,7 +201,7 @@ export default function FileResultCard({ result }: FileResultCardProps) {
         </div>
 
         {/* Actionable Fix Box if Failure or Warning */}
-        {fix_summary.length > 0 && (
+        {fix_summary && fix_summary.length > 0 && (
           <div className="p-4 rounded-xl bg-rose-950/20 border border-rose-500/30 text-xs space-y-2">
             <div className="flex items-center gap-2 text-rose-400 font-bold">
               <Wrench className="w-4 h-4" />
@@ -174,25 +244,25 @@ export default function FileResultCard({ result }: FileResultCardProps) {
                 <div className="flex justify-between">
                   <span className="text-slate-400">Integrated:</span>
                   <span className="font-mono text-white font-semibold">
-                    {loudness.integrated_lufs !== null ? `${loudness.integrated_lufs} LUFS` : 'N/A'}
+                    {loudness?.integrated_lufs !== null && loudness?.integrated_lufs !== undefined ? `${loudness.integrated_lufs} LUFS` : 'N/A'}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Short-Term Max:</span>
                   <span className="font-mono text-white">
-                    {loudness.short_term_max_lufs !== null ? `${loudness.short_term_max_lufs} LUFS` : 'N/A'}
+                    {loudness?.short_term_max_lufs !== null && loudness?.short_term_max_lufs !== undefined ? `${loudness.short_term_max_lufs} LUFS` : 'N/A'}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Momentary Max:</span>
                   <span className="font-mono text-white">
-                    {loudness.momentary_max_lufs !== null ? `${loudness.momentary_max_lufs} LUFS` : 'N/A'}
+                    {loudness?.momentary_max_lufs !== null && loudness?.momentary_max_lufs !== undefined ? `${loudness.momentary_max_lufs} LUFS` : 'N/A'}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Loudness Range (LRA):</span>
                   <span className="font-mono text-white">
-                    {loudness.loudness_range_lu !== null ? `${loudness.loudness_range_lu} LU` : 'N/A'}
+                    {loudness?.loudness_range_lu !== null && loudness?.loudness_range_lu !== undefined ? `${loudness.loudness_range_lu} LU` : 'N/A'}
                   </span>
                 </div>
               </div>
@@ -207,20 +277,24 @@ export default function FileResultCard({ result }: FileResultCardProps) {
               <div className="space-y-1.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-slate-400">Sample Peak:</span>
-                  <span className="font-mono text-white font-semibold">{peaks.sample_peak_dbfs} dBFS</span>
+                  <span className="font-mono text-white font-semibold">
+                    {peaks?.sample_peak_dbfs !== undefined ? `${peaks.sample_peak_dbfs} dBFS` : 'N/A'}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">True Peak (4x Sinc):</span>
-                  <span className="font-mono text-white font-semibold">{peaks.true_peak_dbtp} dBTP</span>
+                  <span className="font-mono text-white font-semibold">
+                    {peaks?.true_peak_dbtp !== undefined ? `${peaks.true_peak_dbtp} dBTP` : 'N/A'}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Clipping Events:</span>
-                  <span className="font-mono text-white">{clipping.consecutive_clipped_runs} runs</span>
+                  <span className="font-mono text-white">{clipping?.consecutive_clipped_runs ?? 0} runs</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Clipped Samples:</span>
-                  <span className={`font-mono ${clipping.clipped_samples > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400'}`}>
-                    {clipping.clipped_samples.toLocaleString()}
+                  <span className={`font-mono ${clipping && clipping.clipped_samples > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400'}`}>
+                    {(clipping?.clipped_samples ?? 0).toLocaleString()}
                   </span>
                 </div>
               </div>
@@ -235,11 +309,11 @@ export default function FileResultCard({ result }: FileResultCardProps) {
               <div className="space-y-1.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-slate-400">Leading Silence:</span>
-                  <span className="font-mono text-white">{silence.leading_silence_sec}s</span>
+                  <span className="font-mono text-white">{silence?.leading_silence_sec ?? 0}s</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Trailing Silence:</span>
-                  <span className="font-mono text-white">{silence.trailing_silence_sec}s</span>
+                  <span className="font-mono text-white">{silence?.trailing_silence_sec ?? 0}s</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Total Samples:</span>

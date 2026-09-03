@@ -1,17 +1,16 @@
 'use client';
 
 import React, { useState, useRef, DragEvent, ChangeEvent } from 'react';
-import { UploadCloud, Music, FileAudio, AlertCircle } from 'lucide-react';
+import { UploadCloud, AlertCircle } from 'lucide-react';
+import { MAX_FILE_SIZE_MB, SUPPORTED_EXTENSIONS, MAX_BATCH_SIZE } from '@/config/batch';
 
 interface AudioDropzoneProps {
   onFilesSelected: (files: File[]) => void;
   disabled?: boolean;
+  currentCount?: number;
 }
 
-const SUPPORTED_EXTS = ['.wav', '.aiff', '.aif', '.flac', '.mp3', '.ogg', '.m4a'];
-const MAX_FILE_SIZE_MB = 250;
-
-export default function AudioDropzone({ onFilesSelected, disabled }: AudioDropzoneProps) {
+export default function AudioDropzone({ onFilesSelected, disabled, currentCount = 0 }: AudioDropzoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -21,11 +20,24 @@ export default function AudioDropzone({ onFilesSelected, disabled }: AudioDropzo
     const validFiles: File[] = [];
     const invalidNames: string[] = [];
 
-    Array.from(incomingList).forEach((file) => {
+    const incomingArray = Array.from(incomingList);
+    const remainingSlots = MAX_BATCH_SIZE - currentCount;
+
+    if (remainingSlots <= 0) {
+      setErrorMsg(`Batch limit of ${MAX_BATCH_SIZE} files reached. Please remove files or analyze the current batch.`);
+      return;
+    }
+
+    const filesToConsider = incomingArray.slice(0, remainingSlots);
+    if (incomingArray.length > remainingSlots) {
+      setErrorMsg(`Maximum ${MAX_BATCH_SIZE} files per batch. Added ${remainingSlots} files, skipped ${incomingArray.length - remainingSlots}.`);
+    }
+
+    filesToConsider.forEach((file) => {
       const ext = '.' + file.name.split('.').pop()?.toLowerCase();
       const sizeMb = file.size / (1024 * 1024);
 
-      if (!SUPPORTED_EXTS.includes(ext)) {
+      if (!SUPPORTED_EXTENSIONS.includes(ext)) {
         invalidNames.push(`${file.name} (unsupported format)`);
       } else if (sizeMb > MAX_FILE_SIZE_MB) {
         invalidNames.push(`${file.name} (exceeds ${MAX_FILE_SIZE_MB}MB limit)`);
@@ -34,7 +46,7 @@ export default function AudioDropzone({ onFilesSelected, disabled }: AudioDropzo
       }
     });
 
-    if (invalidNames.length > 0) {
+    if (invalidNames.length > 0 && !errorMsg) {
       setErrorMsg(`Skipped ${invalidNames.length} invalid file(s): ${invalidNames.slice(0, 2).join(', ')}${invalidNames.length > 2 ? '...' : ''}`);
     }
 
@@ -66,7 +78,6 @@ export default function AudioDropzone({ onFilesSelected, disabled }: AudioDropzo
   const handleFileInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       validateAndAddFiles(e.target.files);
-      // Reset input value so re-selecting the same file works
       e.target.value = '';
     }
   };
@@ -104,7 +115,7 @@ export default function AudioDropzone({ onFilesSelected, disabled }: AudioDropzo
               Drop your audio files here
             </h3>
             <p className="text-sm text-slate-400">
-              or <span className="text-cyan-400 underline underline-offset-4 decoration-cyan-500/40 font-medium">browse files</span> from your computer
+              or <span className="text-cyan-400 underline underline-offset-4 decoration-cyan-500/40 font-medium">browse files</span> from your computer (select multiple)
             </p>
           </div>
 
@@ -119,7 +130,7 @@ export default function AudioDropzone({ onFilesSelected, disabled }: AudioDropzo
               </span>
             ))}
             <span className="text-xs text-slate-400 self-center pl-1">
-              up to 250 MB per file &bull; multi-track batches supported
+              up to {MAX_FILE_SIZE_MB}MB per file &bull; up to {MAX_BATCH_SIZE} files per batch
             </span>
           </div>
         </div>

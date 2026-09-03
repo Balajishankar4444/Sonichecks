@@ -9,7 +9,13 @@ from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 
-from ..config import TEMP_UPLOAD_DIR, MAX_FILE_SIZE_BYTES, ALLOWED_EXTENSIONS
+from ..config import (
+    TEMP_UPLOAD_DIR, 
+    MAX_FILE_SIZE_BYTES, 
+    ALLOWED_EXTENSIONS,
+    MAX_BATCH_SIZE,
+    MAX_CONCURRENT_ANALYSES
+)
 from ..models.results import (
     BatchQCResult,
     FileQCResult,
@@ -63,8 +69,23 @@ def process_file_synchronously(temp_path: Path, original_filename: str, profile:
             profile=profile
         )
         return result
+    except Exception as e:
+        # Graceful failure handling for individual corrupted/unreadable files
+        return FileQCResult(
+            file_id=file_id,
+            filename=original_filename,
+            file_info=None,
+            loudness=None,
+            peaks=None,
+            clipping=None,
+            silence=None,
+            checks=[],
+            overall_status=QCStatus.ERROR,
+            fix_summary=["File is corrupted or uses an unsupported audio codec."],
+            error_message=f"Unable to analyze audio file '{original_filename}'. The file may be corrupted, empty, or use an unsupported codec ({str(e)})."
+        )
     finally:
-        # Safe cleanup
+        # Safe cleanup of temporary audio file
         if temp_path.exists():
             try:
                 os.remove(temp_path)
@@ -145,10 +166,10 @@ async def analyze_batch(
             detail="No files were provided for analysis."
         )
 
-    if len(files) > 50:
+    if len(files) > MAX_BATCH_SIZE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Batch limit exceeded. Maximum 50 files per batch."
+            detail=f"Batch limit exceeded. Maximum {MAX_BATCH_SIZE} files per batch (received {len(files)} files)."
         )
 
     profile = get_profile(profile_id)
@@ -160,65 +181,90 @@ async def analyze_batch(
             safe_name = sanitize_filename(file.filename or f"audio_{uuid.uuid4().hex[:6]}.wav")
             ext = Path(safe_name).suffix.lower()
             
-            if ext not in ALLOWED_EXTENSIONS:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"File '{safe_name}' has unsupported format '{ext}'."
-                )
-
             temp_filename = f"{uuid.uuid4().hex}_{safe_name}"
             temp_path = TEMP_UPLOAD_DIR / temp_filename
             
+            if ext not in ALLOWED_EXTENSIONS:
+                # Mark as immediate error without crashing whole batch
+                saved_temp_files.append((temp_path, safe_name, f"Unsupported format '{ext}'"))
+                continue
+
             size = 0
+            is_oversized = False
             with open(temp_path, "wb") as f:
                 while chunk := await file.read(1024 * 1024):
                     size += len(chunk)
                     if size > MAX_FILE_SIZE_BYTES:
-                        raise HTTPException(
-                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                            detail=f"File '{safe_name}' exceeds size limit."
-                        )
+                        is_oversized = True
+                        break
                     f.write(chunk)
 
-            if size == 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"File '{safe_name}' is empty."
+            if is_oversized:
+                saved_temp_files.append((temp_path, safe_name, f"File exceeds {MAX_FILE_SIZE_BYTES // (1024*1024)}MB size limit."))
+            elif size == 0:
+                saved_temp_files.append((temp_path, safe_name, "File is empty (0 bytes)."))
+            else:
+                saved_temp_files.append((temp_path, safe_name, None))
+
+        # Process batch with bounded worker concurrency (MAX_CONCURRENT_ANALYSES)
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_ANALYSES)
+        loop = asyncio.get_running_loop()
+
+        async def analyze_single_worker(temp_path: Path, safe_name: str, pre_error: Optional[str]) -> FileQCResult:
+            if pre_error:
+                if temp_path.exists():
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+                return FileQCResult(
+                    file_id=str(uuid.uuid4()),
+                    filename=safe_name,
+                    file_info=None,
+                    loudness=None,
+                    peaks=None,
+                    clipping=None,
+                    silence=None,
+                    checks=[],
+                    overall_status=QCStatus.ERROR,
+                    fix_summary=[pre_error],
+                    error_message=pre_error
                 )
 
-            saved_temp_files.append((temp_path, safe_name))
+            async with semaphore:
+                return await loop.run_in_executor(
+                    None,
+                    process_file_synchronously,
+                    temp_path,
+                    safe_name,
+                    profile
+                )
 
-        # Process batch with controlled concurrency (e.g. 4 parallel workers)
-        loop = asyncio.get_running_loop()
-        file_results: List[FileQCResult] = []
+        tasks = [analyze_single_worker(t_path, s_name, p_err) for t_path, s_name, p_err in saved_temp_files]
+        file_results: List[FileQCResult] = await asyncio.gather(*tasks)
 
-        for temp_path, safe_name in saved_temp_files:
-            res = await loop.run_in_executor(
-                None,
-                process_file_synchronously,
-                temp_path,
-                safe_name,
-                profile
-            )
-            file_results.append(res)
-
-        # Cross-file consistency analysis
+        # Cross-file consistency analysis across successfully analyzed tracks
         consistency_issues = check_batch_consistency(file_results)
 
         # Compute summary
         passed_count = sum(1 for f in file_results if f.overall_status == QCStatus.PASS)
         warn_count = sum(1 for f in file_results if f.overall_status == QCStatus.WARNING)
         failed_count = sum(1 for f in file_results if f.overall_status == QCStatus.FAIL)
+        errors_count = sum(1 for f in file_results if f.overall_status == QCStatus.ERROR)
 
-        valid_lufs = [f.loudness.integrated_lufs for f in file_results if f.loudness.integrated_lufs is not None and f.loudness.integrated_lufs > -60.0]
+        valid_lufs = [
+            f.loudness.integrated_lufs 
+            for f in file_results 
+            if f.loudness and f.loudness.integrated_lufs is not None and f.loudness.integrated_lufs > -60.0
+        ]
         avg_lufs = round(sum(valid_lufs) / len(valid_lufs), 1) if valid_lufs else None
 
-        valid_peaks = [f.peaks.true_peak_dbtp for f in file_results]
+        valid_peaks = [f.peaks.true_peak_dbtp for f in file_results if f.peaks is not None]
         max_tp = max(valid_peaks) if valid_peaks else None
-        total_duration = sum(f.file_info.duration_seconds for f in file_results)
+        total_duration = sum(f.file_info.duration_seconds for f in file_results if f.file_info is not None)
 
         # Batch overall status
-        if failed_count > 0:
+        if failed_count > 0 or errors_count > 0:
             batch_status = QCStatus.FAIL
         elif warn_count > 0 or consistency_issues:
             batch_status = QCStatus.WARNING
@@ -237,6 +283,7 @@ async def analyze_batch(
                 passed=passed_count,
                 warnings=warn_count,
                 failed=failed_count,
+                errors=errors_count,
                 avg_lufs=avg_lufs,
                 highest_true_peak_dbtp=max_tp,
                 total_duration_seconds=round(total_duration, 2)
@@ -248,7 +295,8 @@ async def analyze_batch(
 
     finally:
         # Guarantee cleanup of all remaining temp files
-        for temp_path, _ in saved_temp_files:
+        for item in saved_temp_files:
+            temp_path = item[0]
             if temp_path.exists():
                 try:
                     os.remove(temp_path)

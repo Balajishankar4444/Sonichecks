@@ -6,16 +6,17 @@ import { BatchQCResult, QCStatus } from '@/types/qc';
 
 interface BatchSummaryCardProps {
   batchResult: BatchQCResult;
+  isPartial?: boolean;
 }
 
-export default function BatchSummaryCard({ batchResult }: BatchSummaryCardProps) {
+export default function BatchSummaryCard({ batchResult, isPartial = false }: BatchSummaryCardProps) {
   const { summary, overall_status, profile_name } = batchResult;
 
   const getStatusVisuals = (status: QCStatus) => {
     switch (status) {
       case 'PASS':
         return {
-          title: 'ALL FILES PASSED QUALITY CONTROL',
+          title: isPartial ? 'PARTIAL BATCH — ALL ANALYZED FILES PASSED' : 'ALL FILES PASSED QUALITY CONTROL',
           subtitle: 'Your audio meets the delivery requirements and is ready for distribution.',
           icon: <CheckCircle2 className="w-8 h-8 text-emerald-400" />,
           badgeBg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
@@ -23,17 +24,18 @@ export default function BatchSummaryCard({ batchResult }: BatchSummaryCardProps)
         };
       case 'WARNING':
         return {
-          title: 'QUALITY CONTROL PASSED WITH WARNINGS',
+          title: isPartial ? 'PARTIAL BATCH — PASSED WITH WARNINGS' : 'QUALITY CONTROL PASSED WITH WARNINGS',
           subtitle: 'Minor deviations detected. Review warning notices before final delivery.',
           icon: <AlertTriangle className="w-8 h-8 text-amber-400" />,
           badgeBg: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
           gradientBg: 'from-amber-950/30 via-slate-900 to-slate-950 border-amber-500/30'
         };
+      case 'ERROR':
       case 'FAIL':
       default:
         return {
-          title: 'QUALITY CONTROL FAILED',
-          subtitle: 'One or more audio files exceed delivery limits. Review the required fixes below.',
+          title: isPartial ? 'ANALYSIS CANCELLED — RESULTS SAVED' : 'QUALITY CONTROL FAILED',
+          subtitle: 'One or more audio files exceed delivery limits or could not be decoded. Review details below.',
           icon: <XCircle className="w-8 h-8 text-rose-400" />,
           badgeBg: 'bg-rose-500/10 border-rose-500/30 text-rose-400',
           gradientBg: 'from-rose-950/40 via-slate-900 to-slate-950 border-rose-500/30'
@@ -48,7 +50,7 @@ export default function BatchSummaryCard({ batchResult }: BatchSummaryCardProps)
       {/* Top Banner Verdict */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-800/80">
         <div className="flex items-center gap-4">
-          <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-inner">
+          <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-inner flex-shrink-0">
             {visuals.icon}
           </div>
           <div>
@@ -71,7 +73,7 @@ export default function BatchSummaryCard({ batchResult }: BatchSummaryCardProps)
       </div>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4">
         {/* Total Files */}
         <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Files</p>
@@ -95,6 +97,14 @@ export default function BatchSummaryCard({ batchResult }: BatchSummaryCardProps)
           <p className="text-[11px] font-semibold text-rose-400 uppercase tracking-wider">Failed</p>
           <p className="text-xl font-bold text-rose-400 mt-1">{summary.failed}</p>
         </div>
+
+        {/* Errors */}
+        {summary.errors > 0 && (
+          <div className="p-3.5 rounded-xl bg-slate-900/60 border border-rose-500/30">
+            <p className="text-[11px] font-semibold text-rose-400 uppercase tracking-wider">Errors</p>
+            <p className="text-xl font-bold text-rose-400 mt-1">{summary.errors}</p>
+          </div>
+        )}
 
         {/* Average Loudness */}
         <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80">
