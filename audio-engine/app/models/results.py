@@ -20,6 +20,7 @@ class AudioFileInfo(BaseModel):
     channel_layout: str  # "Mono", "Stereo", "5.1 Surround", etc.
     duration_seconds: float
     num_samples: int
+    sha256_hash: Optional[str] = None
 
 class LoudnessResult(BaseModel):
     integrated_lufs: Optional[float] = None
@@ -73,7 +74,9 @@ class ConsistencyIssue(BaseModel):
     metric: str
     message: str
     severity: QCStatus
-    details: Dict[str, Any]
+    issue_type: str = "INCONSISTENCY"  # "INCONSISTENCY" | "OUTLIER" | "PROFILE_VIOLATION"
+    affected_files: List[str] = []
+    details: Dict[str, Any] = {}
 
 class BatchSummary(BaseModel):
     total_files: int
@@ -84,6 +87,8 @@ class BatchSummary(BaseModel):
     avg_lufs: Optional[float] = None
     highest_true_peak_dbtp: Optional[float] = None
     total_duration_seconds: float
+    batch_health: str = "HEALTHY"  # "HEALTHY" | "NEEDS_ATTENTION" | "CRITICAL_ISSUES"
+    batch_health_reasons: List[str] = []
 
 class BatchQCResult(BaseModel):
     batch_id: str

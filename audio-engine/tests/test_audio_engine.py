@@ -12,7 +12,7 @@ from app.analyzer.clipping import detect_clipping
 from app.analyzer.silence import analyze_silence
 from app.analyzer.consistency import check_batch_consistency
 from app.analyzer.qc_engine import get_profile, evaluate_file_qc
-from app.models.results import QCStatus
+from app.models.results import QCStatus, FileQCResult, AudioFileInfo, LoudnessResult, PeakResult
 from app.config import MAX_BATCH_SIZE
 
 client = TestClient(app)
@@ -43,6 +43,8 @@ def test_clean_sine_wav_analysis(clean_sine_wav: Path):
     assert info.channels == 2
     assert info.channel_layout == "Stereo"
     assert round(info.duration_seconds, 1) == 2.0
+    assert info.sha256_hash is not None
+    assert len(info.sha256_hash) == 64
 
     # 2. Audio data & measurements
     data, sr = load_audio_file(clean_sine_wav)
@@ -67,6 +69,7 @@ def test_clean_sine_wav_analysis(clean_sine_wav: Path):
     
     assert qc_res.filename == "clean_sine_48k_24bit.wav"
     assert qc_res.overall_status in (QCStatus.PASS, QCStatus.WARNING)
+    assert qc_res.file_info.sha256_hash is not None
 
 def test_clipping_detection(clipped_wav: Path):
     data, sr = load_audio_file(clipped_wav)
@@ -97,7 +100,6 @@ def test_silence_detection(silence_padded_wav: Path):
     silence = analyze_silence(data, sr)
     
     assert not silence.is_completely_silent
-    # Leading silence ~0.5s, trailing silence ~1.5s
     assert 0.4 <= silence.leading_silence_sec <= 0.6
     assert 1.4 <= silence.trailing_silence_sec <= 1.6
 
@@ -131,17 +133,60 @@ def test_batch_consistency_warning(clean_sine_wav: Path, clipped_wav: Path):
     assert "Sample Rate" in metric_names
     assert "Bit Depth" in metric_names
 
+def test_outlier_detection_loudness_and_duration():
+    """Verify statistical outlier detection for divergent tracks."""
+    def make_file_result(name: str, lufs: float, dur: float) -> FileQCResult:
+        return FileQCResult(
+            file_id=name,
+            filename=name,
+            file_info=AudioFileInfo(
+                filename=name,
+                file_size_bytes=1000,
+                format="WAV",
+                sample_rate=48000,
+                bit_depth=24,
+                channels=2,
+                channel_layout="Stereo",
+                duration_seconds=dur,
+                num_samples=int(dur * 48000),
+                sha256_hash="abc"
+            ),
+            loudness=LoudnessResult(integrated_lufs=lufs, short_term_max_lufs=lufs+1),
+            peaks=PeakResult(sample_peak_dbfs=-1.0, true_peak_dbtp=-1.0, sample_peak_linear=0.8, true_peak_linear=0.8, is_clipping_risk=False),
+            clipping=None,
+            silence=None,
+            checks=[],
+            overall_status=QCStatus.PASS
+        )
+
+    # 4 tracks with median -14.0 LUFS and 180s duration, 1 outlier at -8.0 LUFS and 900s duration
+    batch = [
+        make_file_result("track_01.wav", -14.1, 180.0),
+        make_file_result("track_02.wav", -13.9, 185.0),
+        make_file_result("track_03.wav", -14.0, 178.0),
+        make_file_result("track_04.wav", -14.2, 182.0),
+        make_file_result("track_outlier.wav", -8.0, 900.0)
+    ]
+
+    issues = check_batch_consistency(batch)
+    outlier_issues = [i for i in issues if i.issue_type == "OUTLIER"]
+    assert len(outlier_issues) >= 1
+    metrics = [i.metric for i in outlier_issues]
+    assert "Loudness Outlier" in metrics or "Duration Outlier" in metrics
+
 def test_api_single_analyze_upload(clean_sine_wav: Path):
     with open(clean_sine_wav, "rb") as f:
         response = client.post(
             "/api/analyze",
             files={"file": ("clean_sine.wav", f, "audio/wav")},
-            data={"profile_id": "streaming"}
+            data={"profile_id": "streaming"},
+            headers={"x-product-tier": "FREE"}
         )
     assert response.status_code == 200
     res = response.json()
     assert res["filename"] == "clean_sine.wav"
     assert res["file_info"]["sample_rate"] == 48000
+    assert res["file_info"]["sha256_hash"] is not None
     assert "peaks" in res
     assert "loudness" in res
     assert "checks" in res
@@ -154,26 +199,29 @@ def test_api_batch_analyze_and_exports(clean_sine_wav: Path, clipped_wav: Path):
                 ("files", ("track1.wav", f1, "audio/wav")),
                 ("files", ("track2.wav", f2, "audio/wav"))
             ],
-            data={"profile_id": "standard"}
+            data={"profile_id": "standard"},
+            headers={"x-product-tier": "PRO"}
         )
     assert response.status_code == 200
     batch_json = response.json()
     assert batch_json["summary"]["total_files"] == 2
     assert len(batch_json["files"]) == 2
     assert len(batch_json["consistency_issues"]) > 0
+    assert batch_json["summary"]["batch_health"] in ("NEEDS_ATTENTION", "CRITICAL_ISSUES")
 
     # Test PDF Export
-    pdf_resp = client.post("/api/export/pdf", json=batch_json)
+    pdf_resp = client.post("/api/export/pdf", json=batch_json, headers={"x-product-tier": "PRO"})
     assert pdf_resp.status_code == 200
     assert pdf_resp.headers["content-type"] == "application/pdf"
     assert len(pdf_resp.content) > 1000
 
     # Test CSV Export
-    csv_resp = client.post("/api/export/csv", json=batch_json)
+    csv_resp = client.post("/api/export/csv", json=batch_json, headers={"x-product-tier": "PRO"})
     assert csv_resp.status_code == 200
     assert "text/csv" in csv_resp.headers["content-type"]
     assert "track1.wav" in csv_resp.text
     assert "track2.wav" in csv_resp.text
+    assert "SHA-256 Hash" in csv_resp.text
 
 def test_batch_error_isolation_with_corrupted_file(clean_sine_wav: Path):
     """Ensure that 1 corrupted file does not abort or crash the remaining batch."""
@@ -185,7 +233,8 @@ def test_batch_error_isolation_with_corrupted_file(clean_sine_wav: Path):
                 ("files", ("valid_track.wav", f_valid, "audio/wav")),
                 ("files", ("broken_corrupted.wav", io.BytesIO(corrupted_bytes), "audio/wav"))
             ],
-            data={"profile_id": "standard"}
+            data={"profile_id": "standard"},
+            headers={"x-product-tier": "PRO"}
         )
     assert response.status_code == 200
     batch_json = response.json()
@@ -200,12 +249,59 @@ def test_batch_error_isolation_with_corrupted_file(clean_sine_wav: Path):
     assert broken_res["error_message"] is not None
     assert batch_json["summary"]["errors"] == 1
 
-def test_batch_size_limit():
-    """Ensure exceeding MAX_BATCH_SIZE is rejected cleanly."""
+def test_free_tier_batch_restriction(clean_sine_wav: Path, clipped_wav: Path):
+    """Ensure Free tier cannot process multiple files in a batch."""
+    with open(clean_sine_wav, "rb") as f1, open(clipped_wav, "rb") as f2:
+        response = client.post(
+            "/api/analyze/batch",
+            files=[
+                ("files", ("track1.wav", f1, "audio/wav")),
+                ("files", ("track2.wav", f2, "audio/wav"))
+            ],
+            headers={"x-product-tier": "FREE"}
+        )
+    assert response.status_code == 403
+    assert "Batch QC is available on Pro" in response.json()["detail"]
+
+def test_free_tier_export_pdf_blocked(clean_sine_wav: Path):
+    """Ensure Free tier cannot export PDF certificates."""
+    dummy_batch = {
+        "batch_id": "123",
+        "created_at": "2026-09-03T12:00:00Z",
+        "profile_id": "standard",
+        "profile_name": "Standard Delivery",
+        "files": [],
+        "consistency_issues": [],
+        "summary": {
+            "total_files": 1,
+            "passed": 1,
+            "warnings": 0,
+            "failed": 0,
+            "errors": 0,
+            "total_duration_seconds": 1.0
+        },
+        "overall_status": "PASS"
+    }
+    response = client.post("/api/export/pdf", json=dummy_batch, headers={"x-product-tier": "FREE"})
+    assert response.status_code == 403
+    assert "PDF QC Certificates are available on Pro" in response.json()["detail"]
+
+def test_pro_tier_batch_size_limit():
+    """Ensure exceeding Pro tier 50 files limit is rejected with upgrade message."""
     dummy_files = [
         ("files", (f"file_{i}.wav", io.BytesIO(b"RIFFdummy"), "audio/wav"))
         for i in range(MAX_BATCH_SIZE + 1)
     ]
-    response = client.post("/api/analyze/batch", files=dummy_files)
+    response = client.post("/api/analyze/batch", files=dummy_files, headers={"x-product-tier": "PRO"})
+    assert response.status_code == 403
+    assert "Upgrade to Studio" in response.json()["detail"]
+
+def test_studio_tier_batch_limit():
+    """Ensure Studio tier accepts up to 200 files and rejects > 200 files."""
+    dummy_files = [
+        ("files", (f"file_{i}.wav", io.BytesIO(b"RIFFdummy"), "audio/wav"))
+        for i in range(201)
+    ]
+    response = client.post("/api/analyze/batch", files=dummy_files, headers={"x-product-tier": "STUDIO"})
     assert response.status_code == 400
-    assert "Batch limit exceeded" in response.json()["detail"]
+    assert "Maximum 200 files" in response.json()["detail"]

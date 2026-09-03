@@ -11,6 +11,7 @@ export interface AudioFileInfo {
   channel_layout: string;
   duration_seconds: number;
   num_samples: number;
+  sha256_hash?: string | null;
 }
 
 export interface LoudnessResult {
@@ -71,6 +72,8 @@ export interface ConsistencyIssue {
   metric: string;
   message: string;
   severity: QCStatus;
+  issue_type?: 'INCONSISTENCY' | 'OUTLIER' | 'PROFILE_VIOLATION';
+  affected_files?: string[];
   details: Record<string, any>;
 }
 
@@ -83,6 +86,8 @@ export interface BatchSummary {
   avg_lufs?: number | null;
   highest_true_peak_dbtp?: number | null;
   total_duration_seconds: number;
+  batch_health?: 'HEALTHY' | 'NEEDS_ATTENTION' | 'CRITICAL_ISSUES';
+  batch_health_reasons?: string[];
 }
 
 export interface BatchQCResult {

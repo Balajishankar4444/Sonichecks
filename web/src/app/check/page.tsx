@@ -1,7 +1,20 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ShieldCheck, AlertCircle, Sparkles, AudioWaveform, RotateCcw } from 'lucide-react';
+import Link from 'next/link';
+import { 
+  ShieldCheck, 
+  AlertCircle, 
+  Sparkles, 
+  AudioWaveform, 
+  RotateCcw, 
+  Lock, 
+  ArrowRight, 
+  Layers, 
+  Table, 
+  LayoutGrid, 
+  ListOrdered 
+} from 'lucide-react';
 import AudioDropzone from '@/components/upload/AudioDropzone';
 import FileQueueList from '@/components/upload/FileQueueList';
 import LoadingSteps, { FileAnalysisStatus } from '@/components/common/LoadingSteps';
@@ -10,12 +23,17 @@ import ConsistencyAlertBanner from '@/components/results/ConsistencyAlertBanner'
 import FileResultCard from '@/components/results/FileResultCard';
 import FilterSortBar, { FilterStatus, SortOption } from '@/components/results/FilterSortBar';
 import ExportActions from '@/components/results/ExportActions';
+import BatchComparisonMatrix from '@/components/results/BatchComparisonMatrix';
+import UpgradePromptModal, { UpgradePromptState } from '@/components/common/UpgradePromptModal';
+import TierBadgeSelector from '@/components/common/TierBadgeSelector';
 import { BatchQCResult, FileQCResult, QCProfile, QCStatus } from '@/types/qc';
 import { getQCProfiles, analyzeBatchFiles, analyzeSingleFile } from '@/lib/api';
-import { saveBatchToHistory } from '@/lib/storage';
-import { MAX_BATCH_SIZE } from '@/config/batch';
+import { saveBatchToHistory, getUsageState, UsageState } from '@/lib/storage';
+import { ProductTier, TIER_CONFIGS, getTierConfig } from '@/config/tiers';
+import { useAuth } from '@/context/AuthContext';
 
 export default function CheckPage() {
+  const { user, openAuthModal } = useAuth();
   const [files, setFiles] = useState<File[]>([]);
   const [profiles, setProfiles] = useState<QCProfile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<QCProfile | null>(null);
@@ -24,21 +42,34 @@ export default function CheckPage() {
   const [batchResult, setBatchResult] = useState<BatchQCResult | null>(null);
   const [isPartialCancelled, setIsPartialCancelled] = useState(false);
 
+  // User Tier and Usage State (linked to user email)
+  const [usage, setUsage] = useState<UsageState | null>(null);
+  const userTier: ProductTier = (usage?.plan?.toUpperCase() as ProductTier) || 'FREE';
+  const tierConfig = getTierConfig(userTier);
+
+  // Feature Gate Prompt Modal
+  const [upgradePrompt, setUpgradePrompt] = useState<UpgradePromptState | null>(null);
+
   // Progress state
   const [completedCount, setCompletedCount] = useState(0);
   const [currentFilename, setCurrentFilename] = useState<string | undefined>(undefined);
   const [fileStatuses, setFileStatuses] = useState<FileAnalysisStatus[]>([]);
   const [retryingFilename, setRetryingFilename] = useState<string | null>(null);
 
-  // Filtering and Sorting
+  // Filtering, Technical Filters & Sorting
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<FilterStatus>('ALL');
   const [activeSort, setActiveSort] = useState<SortOption>('NAME_ASC');
+  const [formatFilter, setFormatFilter] = useState<string>('ALL');
+  const [sampleRateFilter, setSampleRateFilter] = useState<string>('ALL');
+  const [viewMode, setViewMode] = useState<'MATRIX' | 'CARDS'>('MATRIX');
+  const [selectedInspectFile, setSelectedInspectFile] = useState<FileQCResult | null>(null);
 
   // Abort controller ref for cancellation
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    setUsage(getUsageState(user?.email || undefined));
     async function loadProfiles() {
       const data = await getQCProfiles();
       setProfiles(data);
@@ -47,13 +78,47 @@ export default function CheckPage() {
       }
     }
     loadProfiles();
-  }, []);
+  }, [user]);
+
+  const triggerGate = (featureName: string, description: string, requiredTier: ProductTier = 'PRO') => {
+    setUpgradePrompt({
+      isOpen: true,
+      featureName,
+      description,
+      requiredTier
+    });
+  };
 
   const handleFilesSelected = (newFiles: File[]) => {
     setErrorMessage(null);
+
+    // Free Tier restriction: Single-file only
+    if (userTier === 'FREE' && (newFiles.length > 1 || files.length >= 1)) {
+      triggerGate(
+        'Multi-File Batch QC',
+        'Batch QC is available on Pro. Upgrade to Pro to analyze up to 50 files at once.',
+        'PRO'
+      );
+      // Keep only first file for Free user
+      setFiles(newFiles.slice(0, 1));
+      return;
+    }
+
+    // Check tier batch limit
+    const maxLimit = tierConfig.maxBatchSize;
     setFiles((prev) => {
       const combined = [...prev, ...newFiles];
-      return combined.slice(0, MAX_BATCH_SIZE);
+      if (combined.length > maxLimit) {
+        if (userTier === 'PRO') {
+          triggerGate(
+            'High-Capacity Batch QC (200 Files)',
+            `Pro plan supports up to 50 files per batch. Upgrade to Studio to analyze up to 200 files at once.`,
+            'STUDIO'
+          );
+        }
+        return combined.slice(0, maxLimit);
+      }
+      return combined;
     });
   };
 
@@ -90,10 +155,42 @@ export default function CheckPage() {
   const handleStartAnalysis = async () => {
     if (files.length === 0 || !selectedProfile) return;
 
+    // Login requirement: prompt to login if not authenticated
+    if (!user) {
+      openAuthModal(() => {
+        // Will auto resume once logged in
+        setTimeout(() => {
+          handleStartAnalysis();
+        }, 150);
+      });
+      return;
+    }
+
+    // Check monthly allowance limit
+    if (usage && usage.filesChecked + files.length > tierConfig.monthlyFileLimit) {
+      triggerGate(
+        'Monthly QC Allowance Exceeded',
+        `You have used ${usage.filesChecked} of your ${tierConfig.monthlyFileLimit} monthly checks on the ${tierConfig.name} plan. Upgrade to unlock higher file allowances.`,
+        userTier === 'FREE' ? 'PRO' : 'STUDIO'
+      );
+      return;
+    }
+
+    // Free tier single-file constraint enforcement
+    if (userTier === 'FREE' && files.length > 1) {
+      triggerGate(
+        'Batch Processing Restricted',
+        'Free tier is restricted to single-file analysis. Upgrade to Pro to process multi-track batches.',
+        'PRO'
+      );
+      return;
+    }
+
     setIsAnalyzing(true);
     setErrorMessage(null);
     setIsPartialCancelled(false);
     setCompletedCount(0);
+    setSelectedInspectFile(null);
 
     const initialStatuses: FileAnalysisStatus[] = files.map((f) => ({
       filename: f.name,
@@ -103,52 +200,94 @@ export default function CheckPage() {
 
     abortControllerRef.current = new AbortController();
 
-    // Fake ticker to simulate per-file queue steps during active batch upload
-    const ticker = setInterval(() => {
-      setCompletedCount((prev) => {
-        const next = Math.min(files.length - 1, prev + 1);
-        if (next < files.length) {
-          setCurrentFilename(files[next]?.name);
-          setFileStatuses((statuses) =>
-            statuses.map((s, idx) => {
-              if (idx < next) return { ...s, status: 'DONE' };
-              if (idx === next) return { ...s, status: 'ANALYZING' };
-              return s;
-            })
-          );
-        }
-        return next;
-      });
-    }, 450);
-
     try {
-      const result = await analyzeBatchFiles(
-        files,
-        selectedProfile.profile_id,
-        abortControllerRef.current.signal
-      );
-      clearInterval(ticker);
-      setCompletedCount(files.length);
-      setBatchResult(result);
-      saveBatchToHistory(result);
+      if (files.length === 1) {
+        // Single file QC
+        setCurrentFilename(files[0].name);
+        setFileStatuses([{ filename: files[0].name, status: 'ANALYZING' }]);
+        
+        const singleResult = await analyzeSingleFile(
+          files[0],
+          selectedProfile.profile_id,
+          abortControllerRef.current.signal,
+          userTier
+        );
+
+        const syntheticBatch: BatchQCResult = {
+          batch_id: singleResult.file_id,
+          created_at: new Date().toISOString(),
+          profile_id: selectedProfile.profile_id,
+          profile_name: selectedProfile.name,
+          files: [singleResult],
+          consistency_issues: [],
+          summary: {
+            total_files: 1,
+            passed: singleResult.overall_status === 'PASS' ? 1 : 0,
+            warnings: singleResult.overall_status === 'WARNING' ? 1 : 0,
+            failed: singleResult.overall_status === 'FAIL' ? 1 : 0,
+            errors: singleResult.overall_status === 'ERROR' ? 1 : 0,
+            avg_lufs: singleResult.loudness?.integrated_lufs ?? null,
+            highest_true_peak_dbtp: singleResult.peaks?.true_peak_dbtp ?? null,
+            total_duration_seconds: singleResult.file_info?.duration_seconds ?? 0,
+            batch_health: singleResult.overall_status === 'FAIL' ? 'CRITICAL_ISSUES' : singleResult.overall_status === 'WARNING' ? 'NEEDS_ATTENTION' : 'HEALTHY',
+            batch_health_reasons: []
+          },
+          overall_status: singleResult.overall_status
+        };
+
+        setCompletedCount(1);
+        setFileStatuses([{ filename: files[0].name, status: 'DONE', qcResultStatus: singleResult.overall_status }]);
+        setBatchResult(syntheticBatch);
+        saveBatchToHistory(syntheticBatch, user?.email || undefined);
+        setUsage(getUsageState(user?.email || undefined));
+      } else {
+        // Multi-file batch QC (Pro / Studio)
+        const ticker = setInterval(() => {
+          setCompletedCount((prev) => {
+            const next = Math.min(files.length - 1, prev + 1);
+            if (next < files.length) {
+              setCurrentFilename(files[next]?.name);
+              setFileStatuses((statuses) =>
+                statuses.map((s, idx) => {
+                  if (idx < next) return { ...s, status: 'DONE' };
+                  if (idx === next) return { ...s, status: 'ANALYZING' };
+                  return s;
+                })
+              );
+            }
+            return next;
+          });
+        }, 400);
+
+        const result = await analyzeBatchFiles(
+          files,
+          selectedProfile.profile_id,
+          abortControllerRef.current.signal,
+          userTier
+        );
+        clearInterval(ticker);
+
+        setCompletedCount(files.length);
+        setBatchResult(result);
+        saveBatchToHistory(result, user?.email || undefined);
+        setUsage(getUsageState(user?.email || undefined));
+      }
     } catch (err: any) {
-      clearInterval(ticker);
       if (err.name === 'AbortError' || err.message?.includes('aborted')) {
         setIsPartialCancelled(true);
-        setErrorMessage('Batch analysis was cancelled by the user.');
+        setErrorMessage('Analysis was cancelled by the user.');
       } else {
         console.error('Analysis error:', err);
         setErrorMessage(
-          err.message || 'Unable to complete batch analysis. Please verify your files and ensure the audio engine is running.'
+          err.message || 'Unable to complete analysis. Please verify your files and ensure the audio engine is running.'
         );
       }
     } finally {
-      clearInterval(ticker);
       setIsAnalyzing(false);
     }
   };
 
-  // Retry single file analysis without re-uploading entire batch
+  // Retry single file analysis
   const handleRetryFile = async (filename: string) => {
     if (!batchResult || !selectedProfile) return;
     const fileObj = files.find((f) => f.name === filename);
@@ -159,9 +298,8 @@ export default function CheckPage() {
 
     setRetryingFilename(filename);
     try {
-      const updatedResult = await analyzeSingleFile(fileObj, selectedProfile.profile_id);
+      const updatedResult = await analyzeSingleFile(fileObj, selectedProfile.profile_id, undefined, userTier);
       
-      // Update this file in batchResult
       setBatchResult((prev) => {
         if (!prev) return null;
         const newFiles = prev.files.map((f) => (f.filename === filename ? updatedResult : f));
@@ -199,64 +337,25 @@ export default function CheckPage() {
     setIsPartialCancelled(false);
     setCompletedCount(0);
     setFileStatuses([]);
+    setSelectedInspectFile(null);
   };
 
-  // Demo Batch Loader
-  const loadDemoBatch = (count: number = 4) => {
-    const createWavBlob = (generator: (i: number) => number, sampleRate: number): File => {
-      const numSamples = sampleRate * 2;
-      const buffer = new ArrayBuffer(44 + numSamples * 2);
-      const view = new DataView(buffer);
-      
-      const writeString = (offset: number, string: string) => {
-        for (let i = 0; i < string.length; i++) {
-          view.setUint8(offset + i, string.charCodeAt(i));
-        }
-      };
-      
-      writeString(0, 'RIFF');
-      view.setUint32(4, 36 + numSamples * 2, true);
-      writeString(8, 'WAVE');
-      writeString(12, 'fmt ');
-      view.setUint32(16, 16, true);
-      view.setUint16(20, 1, true); // PCM
-      view.setUint16(22, 1, true); // Mono
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * 2, true);
-      view.setUint16(32, 2, true);
-      view.setUint16(34, 16, true);
-      writeString(36, 'data');
-      view.setUint32(40, numSamples * 2, true);
-      
-      for (let i = 0; i < numSamples; i++) {
-        const sample = Math.max(-1, Math.min(1, generator(i)));
-        view.setInt16(44 + i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+  // Available Formats & Sample Rates in current batch
+  const { availableFormats, availableSampleRates } = useMemo(() => {
+    if (!batchResult) return { availableFormats: [], availableSampleRates: [] };
+    const fmts = new Set<string>();
+    const srs = new Set<number>();
+    batchResult.files.forEach((f) => {
+      if (f.file_info) {
+        if (f.file_info.format) fmts.add(f.file_info.format.toUpperCase());
+        if (f.file_info.sample_rate) srs.add(f.file_info.sample_rate);
       }
-      
-      const blob = new Blob([buffer], { type: 'audio/wav' });
-      return new File([blob], 'track.wav', { type: 'audio/wav' });
+    });
+    return {
+      availableFormats: Array.from(fmts),
+      availableSampleRates: Array.from(srs).sort((a, b) => a - b)
     };
-
-    const demoTracks: File[] = [];
-
-    // Track 1: Clean Master 48k (PASS)
-    const t1 = createWavBlob((i) => 0.18 * Math.sin((2 * Math.PI * 440 * i) / 48000), 48000);
-    demoTracks.push(new File([t1], '01_Intro_Theme_Master_48k.wav', { type: 'audio/wav' }));
-
-    // Track 2: Overloaded Clipped 44.1k (FAIL)
-    const t2 = createWavBlob((i) => Math.max(-0.9999, Math.min(0.9999, 1.8 * Math.sin((2 * Math.PI * 220 * i) / 44100))), 44100);
-    demoTracks.push(new File([t2], '02_Lead_Vocal_Hot_44k.wav', { type: 'audio/wav' }));
-
-    // Track 3: Excessive Silence (WARNING)
-    const t3 = createWavBlob((i) => (i < 48000 * 0.8 ? 0 : 0.15 * Math.sin((2 * Math.PI * 523 * i) / 48000)), 48000);
-    demoTracks.push(new File([t3], '03_Podcast_Interview_LeadSilence.wav', { type: 'audio/wav' }));
-
-    // Track 4: Clean Instrumental 48k (PASS)
-    const t4 = createWavBlob((i) => 0.16 * Math.sin((2 * Math.PI * 880 * i) / 48000), 48000);
-    demoTracks.push(new File([t4], '04_Outro_Acoustic_48k.wav', { type: 'audio/wav' }));
-
-    setFiles(demoTracks);
-  };
+  }, [batchResult]);
 
   // Filtered & Sorted File Results
   const filteredAndSortedFiles = useMemo(() => {
@@ -264,18 +363,23 @@ export default function CheckPage() {
 
     let list = [...batchResult.files];
 
-    // 1. Search Query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter((f) => f.filename.toLowerCase().includes(q));
     }
 
-    // 2. Status Filter
     if (activeFilter !== 'ALL') {
       list = list.filter((f) => f.overall_status === activeFilter);
     }
 
-    // 3. Sorting
+    if (formatFilter !== 'ALL') {
+      list = list.filter((f) => f.file_info?.format?.toUpperCase() === formatFilter);
+    }
+
+    if (sampleRateFilter !== 'ALL') {
+      list = list.filter((f) => String(f.file_info?.sample_rate) === sampleRateFilter);
+    }
+
     list.sort((a, b) => {
       switch (activeSort) {
         case 'NAME_ASC':
@@ -296,7 +400,7 @@ export default function CheckPage() {
     });
 
     return list;
-  }, [batchResult, searchQuery, activeFilter, activeSort]);
+  }, [batchResult, searchQuery, activeFilter, formatFilter, sampleRateFilter, activeSort]);
 
   const counts = useMemo(() => {
     if (!batchResult) return { all: 0, passed: 0, warnings: 0, failed: 0, errors: 0 };
@@ -311,44 +415,37 @@ export default function CheckPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-5xl mx-auto space-y-8">
-        {/* Page Header */}
-        <div className="text-center space-y-3">
+      <div className="max-w-6xl mx-auto space-y-8">
+        {/* Top Tier & Plan Status Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-900">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold">
             <AudioWaveform className="w-3.5 h-3.5" />
-            <span>Sonichecks V1.1 &bull; Multi-File Batch QC Engine</span>
+            <span>Sonichecks &bull; Audio Quality Control Engine</span>
           </div>
-          <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-            Batch Audio Quality Control Workspace
-          </h1>
-          <p className="text-slate-400 text-sm sm:text-base max-w-2xl mx-auto">
-            Drop up to {MAX_BATCH_SIZE} audio files. Analyze entire albums or delivery folders concurrently with real deterministic signal processing.
-          </p>
+
+          <TierBadgeSelector />
         </div>
 
-        {/* Demo Quick Load Banner */}
-        {files.length === 0 && !batchResult && !isAnalyzing && (
-          <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-cyan-400 flex-shrink-0" />
-              <span>Want to test immediately with a multi-track sample batch?</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => loadDemoBatch(4)}
-              className="px-3 py-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold transition-colors"
-            >
-              Load 4 Demo Tracks
-            </button>
-          </div>
-        )}
+        {/* Page Header */}
+        <div className="text-center space-y-3">
+          <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+            Audio Quality Control Workspace
+          </h1>
+          <p className="text-slate-400 text-sm sm:text-base max-w-2xl mx-auto">
+            {userTier === 'FREE' ? (
+              <>Inspect individual master tracks with real deterministic DSP signal analysis. (Free Tier: 1 file at a time).</>
+            ) : (
+              <>Analyze up to {tierConfig.maxBatchSize} audio files concurrently with multi-track batch matrix alignment.</>
+            )}
+          </p>
+        </div>
 
         {/* Error / Notice Notification */}
         {errorMessage && (
           <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-300 text-sm flex items-start gap-3 shadow-lg">
             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-bold">Batch Notice</p>
+              <p className="font-bold">Notice</p>
               <p className="text-xs text-rose-200/90 mt-0.5 leading-relaxed">{errorMessage}</p>
             </div>
           </div>
@@ -370,50 +467,120 @@ export default function CheckPage() {
         {/* State 2: Results View */}
         {!isAnalyzing && batchResult && (
           <div className="space-y-8 animate-fadeIn">
-            {/* Top Actions */}
-            <ExportActions batchResult={batchResult} onReset={handleReset} />
-
-            {/* Batch Summary */}
-            <BatchSummaryCard batchResult={batchResult} isPartial={isPartialCancelled} />
-
-            {/* Consistency Warning Banner */}
-            <ConsistencyAlertBanner issues={batchResult.consistency_issues} />
-
-            {/* Filter & Search Toolbar */}
-            <FilterSortBar
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              activeFilter={activeFilter}
-              onFilterChange={setActiveFilter}
-              activeSort={activeSort}
-              onSortChange={setActiveSort}
-              counts={counts}
+            {/* Top Actions with Tier Gating */}
+            <ExportActions
+              batchResult={batchResult}
+              userTier={userTier}
+              onGatedAction={triggerGate}
+              onReset={handleReset}
             />
 
-            {/* Per-Track Cards */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Showing {filteredAndSortedFiles.length} of {batchResult.files.length} files</span>
-              </div>
+            {/* Summary Card with Health Diagnosis */}
+            <BatchSummaryCard batchResult={batchResult} isPartial={isPartialCancelled} />
 
-              {filteredAndSortedFiles.length === 0 ? (
-                <div className="p-8 text-center rounded-2xl bg-slate-900/40 border border-slate-800 text-slate-400 text-sm">
-                  No audio files matched the current filter or search criteria.
+            {/* Consistency & Outlier Warning Banner */}
+            {batchResult.files.length > 1 && (
+              <ConsistencyAlertBanner issues={batchResult.consistency_issues} />
+            )}
+
+            {/* View Mode Switcher Toolbar */}
+            {batchResult.files.length > 1 && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-300">View Mode:</span>
+                  <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-900 border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('MATRIX')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                        viewMode === 'MATRIX'
+                          ? 'bg-cyan-500 text-slate-950 shadow-md font-bold'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <Table className="w-3.5 h-3.5" />
+                      <span>QC Matrix</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('CARDS')}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                        viewMode === 'CARDS'
+                          ? 'bg-cyan-500 text-slate-950 shadow-md font-bold'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <LayoutGrid className="w-3.5 h-3.5" />
+                      <span>Track Cards</span>
+                    </button>
+                  </div>
                 </div>
-              ) : (
-                filteredAndSortedFiles.map((fileRes) => (
-                  <FileResultCard
-                    key={fileRes.file_id || fileRes.filename}
-                    result={fileRes}
-                    onRetry={handleRetryFile}
-                    isRetrying={retryingFilename === fileRes.filename}
-                  />
-                ))
-              )}
-            </div>
+              </div>
+            )}
+
+            {/* Batch Comparison Matrix Table */}
+            {viewMode === 'MATRIX' && (
+              <BatchComparisonMatrix
+                batchResult={{
+                  ...batchResult,
+                  files: filteredAndSortedFiles
+                }}
+                isGated={userTier === 'FREE' && batchResult.files.length > 1}
+                onUpgradeClick={() => triggerGate('Batch QC Comparison Matrix', 'Side-by-side alignment across tracks is available on Pro.', 'PRO')}
+                onSelectFileDetail={(file) => setSelectedInspectFile(file)}
+              />
+            )}
+
+            {/* Filter & Search Toolbar */}
+            {batchResult.files.length > 1 && (
+              <FilterSortBar
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                activeFilter={activeFilter}
+                onFilterChange={setActiveFilter}
+                activeSort={activeSort}
+                onSortChange={setActiveSort}
+                formatFilter={formatFilter}
+                onFormatFilterChange={setFormatFilter}
+                availableFormats={availableFormats}
+                sampleRateFilter={sampleRateFilter}
+                onSampleRateFilterChange={setSampleRateFilter}
+                availableSampleRates={availableSampleRates}
+                counts={counts}
+              />
+            )}
+
+            {/* Per-Track Results Cards (when in Cards mode or Single File) */}
+            {(viewMode === 'CARDS' || batchResult.files.length === 1) && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between text-xs text-slate-400">
+                  <span>Showing {filteredAndSortedFiles.length} of {batchResult.files.length} inspected track{batchResult.files.length > 1 ? 's' : ''}</span>
+                </div>
+
+                {filteredAndSortedFiles.length === 0 ? (
+                  <div className="p-8 text-center rounded-2xl bg-slate-900/40 border border-slate-800 text-slate-400 text-sm">
+                    No audio files matched the current filter or search criteria.
+                  </div>
+                ) : (
+                  filteredAndSortedFiles.map((fileRes) => (
+                    <FileResultCard
+                      key={fileRes.file_id || fileRes.filename}
+                      result={fileRes}
+                      onRetry={handleRetryFile}
+                      isRetrying={retryingFilename === fileRes.filename}
+                    />
+                  ))
+                )}
+              </div>
+            )}
 
             {/* Bottom Export Toolbar */}
-            <ExportActions batchResult={batchResult} onReset={handleReset} />
+            <ExportActions
+              batchResult={batchResult}
+              userTier={userTier}
+              onGatedAction={triggerGate}
+              onReset={handleReset}
+            />
           </div>
         )}
 
@@ -442,6 +609,44 @@ export default function CheckPage() {
           </div>
         )}
       </div>
+
+      {/* Selected Single Track Modal */}
+      {selectedInspectFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md overflow-y-auto">
+          <div className="relative w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 space-y-5 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white truncate max-w-md">
+                {selectedInspectFile.filename}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setSelectedInspectFile(null)}
+                className="px-3 py-1 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+              >
+                &larr; Return to Matrix
+              </button>
+            </div>
+
+            <FileResultCard result={selectedInspectFile} />
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setSelectedInspectFile(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors"
+              >
+                Close Inspector
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Feature Gating Modal */}
+      <UpgradePromptModal
+        prompt={upgradePrompt}
+        onClose={() => setUpgradePrompt(null)}
+      />
     </div>
   );
 }

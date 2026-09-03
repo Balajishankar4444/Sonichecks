@@ -1,10 +1,18 @@
 import os
+import hashlib
 import subprocess
 import json
 from pathlib import Path
 from typing import Optional, Tuple
 import soundfile as sf
 from ..models.results import AudioFileInfo
+
+def calculate_file_sha256(file_path: Path) -> str:
+    sha256 = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while chunk := f.read(65536):
+            sha256.update(chunk)
+    return sha256.hexdigest()
 
 def get_channel_layout_name(channels: int) -> str:
     if channels == 1:
@@ -50,6 +58,7 @@ def probe_with_ffprobe(file_path: Path) -> Optional[dict]:
 def extract_file_info(file_path: Path) -> AudioFileInfo:
     filename = file_path.name
     file_size = os.path.getsize(file_path)
+    sha256_hash = calculate_file_sha256(file_path)
     
     # Try reading with soundfile first
     try:
@@ -72,7 +81,8 @@ def extract_file_info(file_path: Path) -> AudioFileInfo:
             channels=channels,
             channel_layout=get_channel_layout_name(channels),
             duration_seconds=round(duration_seconds, 3),
-            num_samples=num_samples
+            num_samples=num_samples,
+            sha256_hash=sha256_hash
         )
     except Exception:
         # Fallback to ffprobe
@@ -103,7 +113,8 @@ def extract_file_info(file_path: Path) -> AudioFileInfo:
                     channels=channels,
                     channel_layout=get_channel_layout_name(channels),
                     duration_seconds=round(duration, 3),
-                    num_samples=num_samples
+                    num_samples=num_samples,
+                    sha256_hash=sha256_hash
                 )
         
         raise ValueError(f"Unable to read audio metadata for {filename}. File may be corrupted or unsupported.")

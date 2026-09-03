@@ -31,8 +31,8 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
     title_style = ParagraphStyle(
         'DocTitle',
         parent=styles['Heading1'],
-        fontSize=20,
-        leading=24,
+        fontSize=18,
+        leading=22,
         textColor=colors.HexColor("#0f172a"),
         fontName='Helvetica-Bold'
     )
@@ -40,8 +40,8 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
     subtitle_style = ParagraphStyle(
         'DocSubtitle',
         parent=styles['Normal'],
-        fontSize=10,
-        leading=14,
+        fontSize=9,
+        leading=13,
         textColor=colors.HexColor("#64748b"),
         fontName='Helvetica'
     )
@@ -49,19 +49,19 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
     section_style = ParagraphStyle(
         'SectionHeading',
         parent=styles['Heading2'],
-        fontSize=13,
-        leading=17,
+        fontSize=12,
+        leading=16,
         textColor=colors.HexColor("#1e293b"),
         fontName='Helvetica-Bold',
-        spaceBefore=12,
+        spaceBefore=10,
         spaceAfter=6
     )
 
     cell_style = ParagraphStyle(
         'TableCell',
         parent=styles['Normal'],
-        fontSize=9,
-        leading=12,
+        fontSize=8.5,
+        leading=11.5,
         textColor=colors.HexColor("#334155")
     )
     
@@ -71,13 +71,22 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
         fontName='Helvetica-Bold'
     )
 
+    hash_style = ParagraphStyle(
+        'HashStyle',
+        parent=cell_style,
+        fontSize=7.5,
+        leading=9.5,
+        textColor=colors.HexColor("#64748b"),
+        fontName='Courier'
+    )
+
     story = []
 
     # 1. Header Banner
     header_data = [
         [
-            Paragraph("<b>SONICHECKS</b> &bull; Audio Quality Control Report", title_style),
-            Paragraph(f"<b>Date:</b> {datetime.now().strftime('%Y-%m-%d %H:%M')}<br/><b>Batch ID:</b> {batch_result.batch_id[:8]}", subtitle_style)
+            Paragraph("<b>SONICHECKS</b> &bull; Audio Quality Control Certificate", title_style),
+            Paragraph(f"<b>Issued:</b> {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}<br/><b>Batch ID:</b> {batch_result.batch_id[:8]}", subtitle_style)
         ]
     ]
     header_table = Table(header_data, colWidths=[360, 180])
@@ -86,17 +95,17 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
         ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
     ]))
     story.append(header_table)
-    story.append(Spacer(1, 10))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#0ea5e9"), spaceBefore=2, spaceAfter=12))
+    story.append(Spacer(1, 8))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#0ea5e9"), spaceBefore=2, spaceAfter=10))
 
     # 2. Executive Summary Box
     status_bg = "#ecfdf5" if batch_result.overall_status == QCStatus.PASS else ("#fffbeb" if batch_result.overall_status == QCStatus.WARNING else "#fef2f2")
     status_color = "#059669" if batch_result.overall_status == QCStatus.PASS else ("#d97706" if batch_result.overall_status == QCStatus.WARNING else "#dc2626")
     
-    verdict_text = f"<font size='14' color='{status_color}'><b>OVERALL VERDICT: {batch_result.overall_status.value}</b></font>"
+    verdict_text = f"<font size='13' color='{status_color}'><b>OVERALL VERDICT: {batch_result.overall_status.value}</b></font>"
     summary_html = f"""
-    <b>Profile:</b> {batch_result.profile_name}<br/>
-    <b>Total Files Checked:</b> {batch_result.summary.total_files} &nbsp;|&nbsp; 
+    <b>Target Profile:</b> {batch_result.profile_name}<br/>
+    <b>Total Files Inspected:</b> {batch_result.summary.total_files} &nbsp;|&nbsp; 
     <b>Passed:</b> <font color='#059669'>{batch_result.summary.passed}</font> &nbsp;|&nbsp; 
     <b>Warnings:</b> <font color='#d97706'>{batch_result.summary.warnings}</font> &nbsp;|&nbsp; 
     <b>Failed:</b> <font color='#dc2626'>{batch_result.summary.failed}</font><br/>
@@ -113,11 +122,11 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
     summary_box.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor(status_bg)),
         ('BOX', (0, 0), (-1, -1), 1, colors.HexColor(status_color)),
-        ('PADDING', (0, 0), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 0), (0, 0), 4),
+        ('PADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (0, 0), 3),
     ]))
     story.append(summary_box)
-    story.append(Spacer(1, 14))
+    story.append(Spacer(1, 10))
 
     # 3. Consistency Alerts (if any)
     if batch_result.consistency_issues:
@@ -133,13 +142,13 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#fffbeb")),
             ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#fde68a")),
             ('INNERGRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#fef3c7")),
-            ('PADDING', (0, 0), (-1, -1), 6),
+            ('PADDING', (0, 0), (-1, -1), 5),
         ]))
         story.append(cons_table)
-        story.append(Spacer(1, 14))
+        story.append(Spacer(1, 10))
 
     # 4. Detailed File Inspections
-    story.append(Paragraph("Inspected Audio Files", section_style))
+    story.append(Paragraph("Inspected Audio Files & SHA-256 Hashes", section_style))
 
     for f in batch_result.files:
         f_color = "#059669" if f.overall_status == QCStatus.PASS else ("#d97706" if f.overall_status == QCStatus.WARNING else "#dc2626")
@@ -170,6 +179,13 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
                     Paragraph(f"{round(f.file_info.duration_seconds, 2)}s", cell_style),
                 ]
             ]
+
+            if f.file_info.sha256_hash:
+                metrics_rows.append([
+                    Paragraph("<b>SHA-256 Hash:</b>", cell_style),
+                    Paragraph(f.file_info.sha256_hash, hash_style),
+                    "", ""
+                ])
             
             if f.fix_summary:
                 fixes_text = "<br/>".join([f"&bull; {fix}" for fix in f.fix_summary])
@@ -194,7 +210,7 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
         card_table = Table(
             [
                 file_header,
-                [Table(metrics_rows, colWidths=[125, 135, 125, 135]), ""]
+                [Table(metrics_rows, colWidths=[120, 140, 120, 140]), ""]
             ], 
             colWidths=[400, 140]
         )
@@ -203,18 +219,18 @@ def generate_pdf_report(batch_result: BatchQCResult) -> bytes:
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
             ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
             ('LINEBELOW', (0, 0), (1, 0), 0.5, colors.HexColor("#e2e8f0")),
-            ('PADDING', (0, 0), (-1, -1), 6),
+            ('PADDING', (0, 0), (-1, -1), 5),
         ]))
 
         story.append(KeepTogether([
             card_table,
-            Spacer(1, 8)
+            Spacer(1, 6)
         ]))
 
     # 5. Footer note
-    story.append(Spacer(1, 14))
+    story.append(Spacer(1, 10))
     story.append(Paragraph(
-        "<i>Generated deterministically by Sonichecks Audio Engine (ITU-R BS.1770-4 / EBU R128 compliance algorithms).</i>",
+        "<i>Deterministic verification certificate generated by Sonichecks DSP Audio Engine (ITU-R BS.1770-4 / EBU R128).</i>",
         subtitle_style
     ))
 

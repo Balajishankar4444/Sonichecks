@@ -323,6 +323,12 @@ export default function FileResultCard({ result, onRetry, isRetrying = false }: 
                   <span className="text-slate-400">Codec / Subtype:</span>
                   <span className="font-mono text-white">{file_info.codec || file_info.format}</span>
                 </div>
+                {file_info.sha256_hash && (
+                  <div className="flex flex-col gap-0.5 pt-1 border-t border-slate-800">
+                    <span className="text-slate-400">SHA-256 Hash:</span>
+                    <span className="font-mono text-[10px] text-cyan-300 break-all">{file_info.sha256_hash}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

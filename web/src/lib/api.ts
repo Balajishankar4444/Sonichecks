@@ -1,4 +1,5 @@
 import { BatchQCResult, FileQCResult, QCProfile } from '@/types/qc';
+import { ProductTier } from '@/config/tiers';
 
 const AUDIO_ENGINE_URL = process.env.NEXT_PUBLIC_AUDIO_ENGINE_URL || 'http://localhost:8000';
 
@@ -9,7 +10,6 @@ export async function getQCProfiles(): Promise<QCProfile[]> {
     return await res.json();
   } catch (err) {
     console.error('Failed to fetch profiles:', err);
-    // Fallback default profiles if backend is starting
     return [
       {
         profile_id: 'standard',
@@ -88,7 +88,8 @@ export async function getQCProfiles(): Promise<QCProfile[]> {
 export async function analyzeSingleFile(
   file: File,
   profileId: string = 'standard',
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  tier: ProductTier = 'FREE'
 ): Promise<FileQCResult> {
   const formData = new FormData();
   formData.append('file', file);
@@ -96,6 +97,9 @@ export async function analyzeSingleFile(
 
   const res = await fetch(`${AUDIO_ENGINE_URL}/api/analyze`, {
     method: 'POST',
+    headers: {
+      'x-product-tier': tier
+    },
     body: formData,
     signal
   });
@@ -115,7 +119,8 @@ export async function analyzeSingleFile(
 export async function analyzeBatchFiles(
   files: File[],
   profileId: string = 'standard',
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  tier: ProductTier = 'PRO'
 ): Promise<BatchQCResult> {
   const formData = new FormData();
   files.forEach(file => {
@@ -125,6 +130,9 @@ export async function analyzeBatchFiles(
 
   const res = await fetch(`${AUDIO_ENGINE_URL}/api/analyze/batch`, {
     method: 'POST',
+    headers: {
+      'x-product-tier': tier
+    },
     body: formData,
     signal
   });
@@ -141,34 +149,54 @@ export async function analyzeBatchFiles(
   return await res.json();
 }
 
-export async function downloadPdfReport(batchResult: BatchQCResult): Promise<void> {
+export async function downloadPdfReport(batchResult: BatchQCResult, tier: ProductTier = 'PRO'): Promise<void> {
   const res = await fetch(`${AUDIO_ENGINE_URL}/api/export/pdf`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'x-product-tier': tier
+    },
     body: JSON.stringify(batchResult)
   });
 
-  if (!res.ok) throw new Error('Failed to generate PDF report.');
+  if (!res.ok) {
+    let errDetail = 'Failed to generate PDF report.';
+    try {
+      const errJson = await res.json();
+      if (errJson.detail) errDetail = errJson.detail;
+    } catch {}
+    throw new Error(errDetail);
+  }
 
   const blob = await res.blob();
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `sonichecks_report_${batchResult.batch_id.slice(0, 8)}.pdf`;
+  a.download = `sonichecks_qc_certificate_${batchResult.batch_id.slice(0, 8)}.pdf`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   window.URL.revokeObjectURL(url);
 }
 
-export async function downloadCsvReport(batchResult: BatchQCResult): Promise<void> {
+export async function downloadCsvReport(batchResult: BatchQCResult, tier: ProductTier = 'PRO'): Promise<void> {
   const res = await fetch(`${AUDIO_ENGINE_URL}/api/export/csv`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'x-product-tier': tier
+    },
     body: JSON.stringify(batchResult)
   });
 
-  if (!res.ok) throw new Error('Failed to export CSV.');
+  if (!res.ok) {
+    let errDetail = 'Failed to export CSV.';
+    try {
+      const errJson = await res.json();
+      if (errJson.detail) errDetail = errJson.detail;
+    } catch {}
+    throw new Error(errDetail);
+  }
 
   const blob = await res.blob();
   const url = window.URL.createObjectURL(blob);

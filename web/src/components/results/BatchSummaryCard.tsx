@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { CheckCircle2, AlertTriangle, XCircle, Clock, Volume2, Sparkles, Layers } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, Clock, Volume2, Sparkles, Layers, Activity, ShieldAlert } from 'lucide-react';
 import { BatchQCResult, QCStatus } from '@/types/qc';
 
 interface BatchSummaryCardProps {
@@ -10,14 +10,14 @@ interface BatchSummaryCardProps {
 }
 
 export default function BatchSummaryCard({ batchResult, isPartial = false }: BatchSummaryCardProps) {
-  const { summary, overall_status, profile_name } = batchResult;
+  const { summary, overall_status, profile_name, consistency_issues } = batchResult;
 
   const getStatusVisuals = (status: QCStatus) => {
     switch (status) {
       case 'PASS':
         return {
           title: isPartial ? 'PARTIAL BATCH — ALL ANALYZED FILES PASSED' : 'ALL FILES PASSED QUALITY CONTROL',
-          subtitle: 'Your audio meets the delivery requirements and is ready for distribution.',
+          subtitle: 'Your audio meets delivery requirements and is ready for distribution.',
           icon: <CheckCircle2 className="w-8 h-8 text-emerald-400" />,
           badgeBg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
           gradientBg: 'from-emerald-950/40 via-slate-900 to-slate-950 border-emerald-500/30'
@@ -45,6 +45,22 @@ export default function BatchSummaryCard({ batchResult, isPartial = false }: Bat
 
   const visuals = getStatusVisuals(overall_status);
 
+  // Batch health determination
+  const healthStatus = summary.batch_health || (
+    overall_status === 'FAIL' || summary.failed > 0 || summary.errors > 0 ? 'CRITICAL_ISSUES' :
+    overall_status === 'WARNING' || summary.warnings > 0 || (consistency_issues && consistency_issues.length > 0) ? 'NEEDS_ATTENTION' :
+    'HEALTHY'
+  );
+
+  const healthReasons = summary.batch_health_reasons && summary.batch_health_reasons.length > 0
+    ? summary.batch_health_reasons
+    : [
+        summary.failed > 0 ? `${summary.failed} file(s) failed QC checks` : null,
+        summary.errors > 0 ? `${summary.errors} unreadable file(s)` : null,
+        summary.warnings > 0 ? `${summary.warnings} file(s) contain warnings` : null,
+        consistency_issues && consistency_issues.length > 0 ? `${consistency_issues.length} consistency/outlier alert(s)` : null,
+      ].filter(Boolean) as string[];
+
   return (
     <div className={`w-full rounded-2xl border p-6 sm:p-8 bg-gradient-to-b ${visuals.gradientBg} shadow-2xl space-y-6`}>
       {/* Top Banner Verdict */}
@@ -68,6 +84,35 @@ export default function BatchSummaryCard({ batchResult, isPartial = false }: Bat
             <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
               {visuals.subtitle}
             </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Batch Health Section (V1.2) */}
+      <div className={`p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs ${
+        healthStatus === 'HEALTHY'
+          ? 'bg-emerald-950/20 border-emerald-500/30 text-emerald-300'
+          : healthStatus === 'NEEDS_ATTENTION'
+          ? 'bg-amber-950/20 border-amber-500/30 text-amber-300'
+          : 'bg-rose-950/20 border-rose-500/30 text-rose-300'
+      }`}>
+        <div className="flex items-start gap-2.5">
+          <Activity className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="font-bold uppercase tracking-wider text-[11px]">
+                Batch Health: {healthStatus.replace('_', ' ')}
+              </span>
+            </div>
+            {healthReasons.length > 0 ? (
+              <p className="text-slate-300">
+                {healthReasons.join(', ')}.
+              </p>
+            ) : (
+              <p className="text-slate-300">
+                All inspected tracks meet delivery standards with zero format or loudness outliers detected.
+              </p>
+            )}
           </div>
         </div>
       </div>

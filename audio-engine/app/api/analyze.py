@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Response, status
+from fastapi import APIRouter, UploadFile, File, Form, Header, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 
 from ..config import (
@@ -23,6 +23,7 @@ from ..models.results import (
     QCProfile,
     QCStatus
 )
+from ..models.tiers import ProductTier, TierFeatures, get_tier_features
 from ..analyzer.file_info import extract_file_info
 from ..analyzer.loader import load_audio_file
 from ..analyzer.loudness import calculate_loudness
@@ -99,7 +100,8 @@ async def list_qc_profiles():
 @router.post("/analyze", response_model=FileQCResult)
 async def analyze_file(
     file: UploadFile = File(...),
-    profile_id: Optional[str] = Form("standard")
+    profile_id: Optional[str] = Form("standard"),
+    x_product_tier: Optional[str] = Header("FREE")
 ):
     safe_name = sanitize_filename(file.filename or "uploaded_file.wav")
     ext = Path(safe_name).suffix.lower()
@@ -158,7 +160,8 @@ async def analyze_file(
 @router.post("/analyze/batch", response_model=BatchQCResult)
 async def analyze_batch(
     files: List[UploadFile] = File(...),
-    profile_id: Optional[str] = Form("standard")
+    profile_id: Optional[str] = Form("standard"),
+    x_product_tier: Optional[str] = Header("PRO")
 ):
     if not files:
         raise HTTPException(
@@ -166,11 +169,26 @@ async def analyze_batch(
             detail="No files were provided for analysis."
         )
 
-    if len(files) > MAX_BATCH_SIZE:
+    tier_features = get_tier_features(x_product_tier or "PRO")
+
+    # Backend Tier Enforcement
+    if len(files) > 1 and not tier_features.allow_batch_processing:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Batch limit exceeded. Maximum {MAX_BATCH_SIZE} files per batch (received {len(files)} files)."
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Batch QC is available on Pro. Upgrade to Pro to analyze up to 50 files at once."
         )
+
+    if len(files) > tier_features.max_batch_size:
+        if tier_features.name == "Pro":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Pro plan supports up to {tier_features.max_batch_size} files per batch. Upgrade to Studio to analyze up to 200 files at once (received {len(files)} files)."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Batch limit exceeded. Maximum {tier_features.max_batch_size} files per batch (received {len(files)} files)."
+            )
 
     profile = get_profile(profile_id)
     saved_temp_files = []
@@ -263,12 +281,25 @@ async def analyze_batch(
         max_tp = max(valid_peaks) if valid_peaks else None
         total_duration = sum(f.file_info.duration_seconds for f in file_results if f.file_info is not None)
 
-        # Batch overall status
+        # Determine Batch Health and Reasons
+        health_reasons = []
+        if failed_count > 0:
+            health_reasons.append(f"{failed_count} file{'s' if failed_count != 1 else ''} failed QC")
+        if errors_count > 0:
+            health_reasons.append(f"{errors_count} unreadable file{'s' if errors_count != 1 else ''}")
+        if warn_count > 0:
+            health_reasons.append(f"{warn_count} file{'s' if warn_count != 1 else ''} contain warnings")
+        if consistency_issues:
+            health_reasons.append(f"{len(consistency_issues)} consistency/outlier alert{'s' if len(consistency_issues) != 1 else ''} detected")
+
         if failed_count > 0 or errors_count > 0:
+            batch_health = "CRITICAL_ISSUES"
             batch_status = QCStatus.FAIL
         elif warn_count > 0 or consistency_issues:
+            batch_health = "NEEDS_ATTENTION"
             batch_status = QCStatus.WARNING
         else:
+            batch_health = "HEALTHY"
             batch_status = QCStatus.PASS
 
         batch_result = BatchQCResult(
@@ -286,7 +317,9 @@ async def analyze_batch(
                 errors=errors_count,
                 avg_lufs=avg_lufs,
                 highest_true_peak_dbtp=max_tp,
-                total_duration_seconds=round(total_duration, 2)
+                total_duration_seconds=round(total_duration, 2),
+                batch_health=batch_health,
+                batch_health_reasons=health_reasons
             ),
             overall_status=batch_status
         )
@@ -304,7 +337,17 @@ async def analyze_batch(
                     pass
 
 @router.post("/export/pdf")
-async def export_pdf(result: BatchQCResult):
+async def export_pdf(
+    result: BatchQCResult,
+    x_product_tier: Optional[str] = Header("PRO")
+):
+    tier_features = get_tier_features(x_product_tier or "PRO")
+    if not tier_features.allow_pdf_export:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="PDF QC Certificates are available on Pro and Studio plans. Upgrade to Pro to export PDF reports."
+        )
+
     try:
         pdf_bytes = generate_pdf_report(result)
         filename = f"sonichecks_qc_report_{result.batch_id[:8]}.pdf"
@@ -319,7 +362,17 @@ async def export_pdf(result: BatchQCResult):
         raise HTTPException(status_code=500, detail=f"Failed to generate PDF report: {str(e)}")
 
 @router.post("/export/csv")
-async def export_csv(result: BatchQCResult):
+async def export_csv(
+    result: BatchQCResult,
+    x_product_tier: Optional[str] = Header("PRO")
+):
+    tier_features = get_tier_features(x_product_tier or "PRO")
+    if not tier_features.allow_csv_export:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CSV Export is available on Pro and Studio plans. Upgrade to Pro to export CSV spreadsheets."
+        )
+
     try:
         csv_text = generate_csv_report(result)
         filename = f"sonichecks_qc_{result.batch_id[:8]}.csv"

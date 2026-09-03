@@ -24,6 +24,7 @@ def generate_csv_report(batch_result: BatchQCResult) -> str:
         "Clipped Samples",
         "Leading Silence (s)",
         "Trailing Silence (s)",
+        "SHA-256 Hash",
         "Required Fixes",
         "Error / Notes"
     ]
@@ -48,6 +49,7 @@ def generate_csv_report(batch_result: BatchQCResult) -> str:
                 f.clipping.clipped_samples if f.clipping else 0,
                 f.silence.leading_silence_sec if f.silence else 0.0,
                 f.silence.trailing_silence_sec if f.silence else 0.0,
+                f.file_info.sha256_hash or "N/A",
                 fixes,
                 f.error_message or ""
             ]
@@ -68,6 +70,7 @@ def generate_csv_report(batch_result: BatchQCResult) -> str:
                 0,
                 0.0,
                 0.0,
+                "N/A",
                 "None",
                 f.error_message or "Failed to analyze file"
             ]

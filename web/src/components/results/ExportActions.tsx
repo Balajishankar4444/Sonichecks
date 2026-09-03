@@ -1,23 +1,42 @@
 'use client';
 
 import React, { useState } from 'react';
-import { FileDown, FileSpreadsheet, RotateCcw, Loader2 } from 'lucide-react';
+import { FileDown, FileSpreadsheet, RotateCcw, Loader2, Lock } from 'lucide-react';
 import { BatchQCResult } from '@/types/qc';
 import { downloadPdfReport, downloadCsvReport } from '@/lib/api';
+import { ProductTier } from '@/config/tiers';
 
 interface ExportActionsProps {
   batchResult: BatchQCResult;
+  userTier?: ProductTier;
+  onGatedAction?: (featureName: string, description: string, requiredTier: ProductTier) => void;
   onReset: () => void;
 }
 
-export default function ExportActions({ batchResult, onReset }: ExportActionsProps) {
+export default function ExportActions({
+  batchResult,
+  userTier = 'PRO',
+  onGatedAction,
+  onReset
+}: ExportActionsProps) {
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [isDownloadingCsv, setIsDownloadingCsv] = useState(false);
 
+  const isFree = userTier === 'FREE';
+
   const handlePdfDownload = async () => {
+    if (isFree && onGatedAction) {
+      onGatedAction(
+        'Professional PDF QC Certificate',
+        'Downloadable timestamped PDF certificates with SHA-256 verification hashes are available on Pro and Studio plans.',
+        'PRO'
+      );
+      return;
+    }
+
     try {
       setIsDownloadingPdf(true);
-      await downloadPdfReport(batchResult);
+      await downloadPdfReport(batchResult, userTier);
     } catch (err) {
       alert('Failed to download PDF report. Please verify the audio engine is running.');
     } finally {
@@ -26,9 +45,18 @@ export default function ExportActions({ batchResult, onReset }: ExportActionsPro
   };
 
   const handleCsvDownload = async () => {
+    if (isFree && onGatedAction) {
+      onGatedAction(
+        'CSV Batch Export',
+        'CSV spreadsheet export of all measured QC metrics is available on Pro and Studio plans.',
+        'PRO'
+      );
+      return;
+    }
+
     try {
       setIsDownloadingCsv(true);
-      await downloadCsvReport(batchResult);
+      await downloadCsvReport(batchResult, userTier);
     } catch (err) {
       alert('Failed to download CSV export. Please verify the audio engine is running.');
     } finally {
@@ -44,14 +72,20 @@ export default function ExportActions({ batchResult, onReset }: ExportActionsPro
           type="button"
           onClick={handlePdfDownload}
           disabled={isDownloadingPdf}
-          className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors shadow-sm active:scale-95 disabled:opacity-50"
+          className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-sm active:scale-95 disabled:opacity-50 ${
+            isFree
+              ? 'text-slate-300 bg-slate-800/80 hover:bg-slate-800 border border-slate-700'
+              : 'text-white bg-slate-800 hover:bg-slate-700 border border-slate-700'
+          }`}
         >
           {isDownloadingPdf ? (
             <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+          ) : isFree ? (
+            <Lock className="w-4 h-4 text-amber-400" />
           ) : (
             <FileDown className="w-4 h-4 text-cyan-400" />
           )}
-          <span>Download PDF QC Report</span>
+          <span>{isFree ? 'PDF QC Report (Pro)' : 'Download PDF Certificate'}</span>
         </button>
 
         {/* CSV Download */}
@@ -63,10 +97,12 @@ export default function ExportActions({ batchResult, onReset }: ExportActionsPro
         >
           {isDownloadingCsv ? (
             <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+          ) : isFree ? (
+            <Lock className="w-4 h-4 text-amber-400" />
           ) : (
             <FileSpreadsheet className="w-4 h-4 text-cyan-400" />
           )}
-          <span>Export CSV</span>
+          <span>{isFree ? 'Export CSV (Pro)' : 'Export CSV'}</span>
         </button>
       </div>
 
