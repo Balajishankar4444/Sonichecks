@@ -1,0 +1,41 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Sonichecks Temporary Uploads & Artifacts
+tmp_uploads/
+*/tmp_uploads/
+*.pdf
+*.csv
+!app/
+!web/
+
+# Local Environment Variables
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
