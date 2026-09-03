@@ -4,6 +4,16 @@
 
 export const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://sonichecks.com';
 
+export function getWebSiteSchema() {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'Sonichecks',
+    url: BASE_URL,
+    description: 'Deterministic audio quality control and delivery validation tool for LUFS, True Peak, clipping, silence, and technical audio specifications.',
+  };
+}
+
 export function getOrganizationSchema() {
   return {
     '@context': 'https://schema.org',
@@ -25,7 +35,7 @@ export function getWebApplicationSchema() {
   return {
     '@context': 'https://schema.org',
     '@type': 'WebApplication',
-    name: 'Sonichecks Audio QC Engine',
+    name: 'Sonichecks Audio QC Tool',
     url: `${BASE_URL}/check`,
     applicationCategory: 'MultimediaApplication',
     operatingSystem: 'All modern web browsers (Chrome, Safari, Firefox, Edge)',
@@ -54,22 +64,17 @@ export function getWebApplicationSchema() {
       },
     ],
     featureList: [
-      'In-browser local Web Audio DSP processing (Zero audio uploads)',
+      'Local Browser DSP analysis for supported WAV files (Zero audio upload)',
+      'Reference server analysis for non-WAV formats',
       'ITU-R BS.1770-4 Integrated LUFS & Loudness Range (LRA) measurement',
-      '4x Polyphase True Peak (dBTP) oversampling calculation',
-      'Hard digital flat-top sample clipping detection',
+      '4x Polyphase True Peak (dBTP) calculation',
+      'Sample-level digital flat-top clipping detection',
       'Head and tail silence duration inspection',
-      'Cryptographic SHA-256 track integrity verification',
-      'Exportable PDF Quality Control Inspection Certificates',
+      'Technical format validation (sample rate, bit depth, channel configuration)',
+      'Multi-track album consistency verification',
+      'Downloadable PDF Quality Control Inspection Certificates',
       'CSV spreadsheet batch export',
     ],
-    aggregateRating: {
-      '@type': 'AggregateRating',
-      ratingValue: '4.9',
-      reviewCount: '128',
-      bestRating: '5',
-      worstRating: '1',
-    },
   };
 }
 
