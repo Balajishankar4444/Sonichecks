@@ -1,61 +1,65 @@
-'use client';
-
 import React from 'react';
-import { FileAudio, Trash2, ShieldCheck, Sparkles, X, Layers, AlertTriangle, Cpu, Server } from 'lucide-react';
 import { QCProfile } from '@/types/qc';
-import { MAX_BATCH_SIZE } from '@/config/batch';
-
-export type AnalysisEngineMode = 'LOCAL' | 'SERVER';
+import { EngineMode } from '@/lib/api';
+import { 
+  FileAudio, 
+  Trash2, 
+  Layers, 
+  Sparkles, 
+  Cpu, 
+  Server, 
+  AlertTriangle, 
+  X,
+  ShieldCheck,
+  Zap
+} from 'lucide-react';
 
 interface FileQueueListProps {
   files: File[];
-  onRemoveFile: (index: number) => void;
-  onRemoveDuplicates: () => void;
-  onClearAll: () => void;
-  onStartAnalysis: () => void;
-  isAnalyzing: boolean;
   selectedProfile: QCProfile;
   availableProfiles: QCProfile[];
+  engineMode: EngineMode;
+  onSelectEngineMode: (mode: EngineMode) => void;
   onSelectProfile: (profile: QCProfile) => void;
-  engineMode: AnalysisEngineMode;
-  onSelectEngineMode: (mode: AnalysisEngineMode) => void;
+  onRemoveFile: (index: number) => void;
+  onClearAll: () => void;
+  onRemoveDuplicates?: () => void;
+  duplicateNames?: string[];
+  isAnalyzing: boolean;
+  MAX_BATCH_SIZE?: number;
+  onStartAnalysis?: () => void;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
-export default function FileQueueList({
+export function FileQueueList({
   files,
-  onRemoveFile,
-  onRemoveDuplicates,
-  onClearAll,
-  onStartAnalysis,
-  isAnalyzing,
   selectedProfile,
   availableProfiles,
-  onSelectProfile,
   engineMode,
-  onSelectEngineMode
+  onSelectEngineMode,
+  onSelectProfile,
+  onRemoveFile,
+  onClearAll,
+  onRemoveDuplicates,
+  duplicateNames = [],
+  isAnalyzing,
+  MAX_BATCH_SIZE = 50,
+  onStartAnalysis
 }: FileQueueListProps) {
-  if (files.length === 0) return null;
-
   const totalSize = files.reduce((acc, f) => acc + f.size, 0);
 
-  // Check for duplicate filenames or identical (name+size)
-  const nameCounts: Record<string, number> = {};
-  files.forEach(f => {
-    nameCounts[f.name] = (nameCounts[f.name] || 0) + 1;
-  });
-  const duplicateNames = Object.keys(nameCounts).filter(name => nameCounts[name] > 1);
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  const nonWavFiles = files.filter(f => !f.name.toLowerCase().endsWith('.wav'));
 
   return (
-    <div className="w-full bg-slate-900/60 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5">
-      {/* Header with counts and profile selector */}
+    <div className="w-full rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md p-5 space-y-4">
+      {/* Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
         <div>
           <h4 className="font-semibold text-white flex items-center gap-2 text-base">
@@ -90,7 +94,7 @@ export default function FileQueueList({
             type="button"
             onClick={onClearAll}
             disabled={isAnalyzing}
-            className="text-xs text-slate-400 hover:text-rose-400 px-2 py-1 rounded hover:bg-slate-800 transition-colors ml-1"
+            className="text-xs text-slate-400 hover:text-rose-400 px-2 py-1 rounded hover:bg-slate-800 transition-colors ml-1 cursor-pointer"
           >
             Clear All
           </button>
@@ -99,18 +103,24 @@ export default function FileQueueList({
 
       {/* Engine Selection Bar */}
       <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="space-y-0.5">
-          <span className="text-xs font-bold text-white flex items-center gap-1.5">
-            <span>Analysis Engine</span>
-          </span>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-white">Analysis Engine</span>
+            {engineMode === 'LOCAL' && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <ShieldCheck className="w-3 h-3" />
+                <span>Zero Upload (Private)</span>
+              </span>
+            )}
+          </div>
           <p className="text-[11px] text-slate-400">
             {engineMode === 'LOCAL' 
-              ? 'Local Web Worker DSP engine. Audio is analyzed directly in your browser without uploading to any server.'
-              : 'Python / FastAPI reference microservice. Full ITU-R BS.1770-4 LUFS and 4x True Peak.'}
+              ? 'Local Web Worker DSP engine. Audio samples are analyzed directly in your browser with 0 bytes uploaded to any server.'
+              : 'Python / FastAPI reference microservice. Server-side DSP analysis for reference validation and complex multi-format transcoding.'}
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 self-start sm:self-auto">
+        <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 self-start sm:self-auto flex-shrink-0">
           <button
             type="button"
             onClick={() => onSelectEngineMode('LOCAL')}
@@ -121,7 +131,7 @@ export default function FileQueueList({
             }`}
           >
             <Cpu className="w-3.5 h-3.5" />
-            <span>Local Browser (No Upload)</span>
+            <span>Local Browser (Default)</span>
           </button>
 
           <button
@@ -139,6 +149,16 @@ export default function FileQueueList({
         </div>
       </div>
 
+      {/* Non-WAV Routing Notice */}
+      {engineMode === 'LOCAL' && nonWavFiles.length > 0 && (
+        <div className="px-3.5 py-2.5 rounded-lg bg-blue-950/30 border border-blue-500/30 text-xs text-blue-200 flex items-start gap-2">
+          <Zap className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold">Format Routing Notice:</span> Browser analysis processes uncompressed WAV files locally on your device with 0 upload. Non-WAV formats ({nonWavFiles.map(f => f.name.split('.').pop()?.toUpperCase()).join(', ')}) will be analyzed using the Python Reference Engine.
+          </div>
+        </div>
+      )}
+
       {/* Duplicate Warning Banner */}
       {duplicateNames.length > 0 && (
         <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -152,7 +172,7 @@ export default function FileQueueList({
           <button
             type="button"
             onClick={onRemoveDuplicates}
-            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-semibold whitespace-nowrap self-start sm:self-auto transition-colors"
+            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-semibold whitespace-nowrap self-start sm:self-auto transition-colors cursor-pointer"
           >
             Remove Duplicates
           </button>
@@ -171,6 +191,7 @@ export default function FileQueueList({
       <div className="max-h-72 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
         {files.map((file, idx) => {
           const ext = file.name.split('.').pop()?.toUpperCase() || 'AUDIO';
+          const isWav = file.name.toLowerCase().endsWith('.wav');
           const isDuplicate = duplicateNames.includes(file.name);
 
           return (
@@ -199,12 +220,22 @@ export default function FileQueueList({
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
                     <span className="font-mono">{formatBytes(file.size)}</span>
                     <span>&bull;</span>
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
                       {ext}
                     </span>
+                    <span>&bull;</span>
+                    {isWav ? (
+                      <span className="text-[10px] font-semibold text-emerald-400 flex items-center gap-1">
+                        <span>🔒 Local Browser DSP</span>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold text-cyan-400 flex items-center gap-1">
+                        <span>🌐 Server Reference</span>
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -222,23 +253,10 @@ export default function FileQueueList({
           );
         })}
       </div>
-
-      {/* Dynamic Action Button */}
-      <div className="pt-2">
-        <button
-          type="button"
-          onClick={onStartAnalysis}
-          disabled={isAnalyzing || files.length === 0}
-          className="w-full py-3.5 px-6 rounded-xl font-bold text-base text-slate-950 bg-gradient-to-r from-cyan-400 via-sky-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-lg shadow-cyan-500/25 active:scale-[0.99] transition-all flex items-center justify-center gap-2.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          <ShieldCheck className="w-5 h-5 stroke-[2.5]" />
-          <span>
-            {engineMode === 'LOCAL' 
-              ? (files.length === 1 ? 'Analyze 1 File (Local Browser DSP)' : `Analyze ${files.length} Files (Local Browser DSP)`)
-              : (files.length === 1 ? 'Analyze 1 File (Server Engine)' : `Analyze ${files.length} Files (Server Engine)`)}
-          </span>
-        </button>
-      </div>
     </div>
   );
 }
+
+export type AnalysisEngineMode = EngineMode;
+export default FileQueueList;
+

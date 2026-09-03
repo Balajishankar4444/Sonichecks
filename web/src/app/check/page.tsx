@@ -218,12 +218,34 @@ export default function CheckPage() {
             prev.map((s, idx) => (idx === i ? { ...s, status: 'ANALYZING' } : s))
           );
 
-          // Local in-browser DSP analysis
-          const measurements = await analyzeWavFileLocally(file, (stage, message, percent) => {
-            // Optional fine-grained progress
-          });
+          let fileQcResult: FileQCResult;
+          const isWav = file.name.toLowerCase().endsWith('.wav');
 
-          const fileQcResult = convertLocalMeasurementsToFileQCResult(measurements, selectedProfile);
+          if (isWav) {
+            // Local in-browser DSP analysis (Zero audio upload)
+            const measurements = await analyzeWavFileLocally(file);
+            fileQcResult = convertLocalMeasurementsToFileQCResult(measurements, selectedProfile);
+          } else {
+            // Non-WAV formats routed to Python Reference Engine
+            try {
+              fileQcResult = await analyzeSingleFile(
+                file,
+                selectedProfile.profile_id,
+                abortControllerRef.current.signal,
+                userTier
+              );
+            } catch (nonWavErr: any) {
+              fileQcResult = {
+                file_id: `err_${Date.now()}_${i}`,
+                filename: file.name,
+                overall_status: 'ERROR',
+                checks: [],
+                fix_summary: [],
+                error_message: `Browser analysis processes uncompressed WAV files locally on your device. Non-WAV format (${file.name.split('.').pop()?.toUpperCase()}) requires Python Reference server. (${nonWavErr.message || 'Server unreachable'})`
+              };
+            }
+          }
+
           localFileResults.push(fileQcResult);
 
           setCompletedCount(i + 1);
@@ -238,6 +260,18 @@ export default function CheckPage() {
         const errors = localFileResults.filter((f) => f.overall_status === 'ERROR').length;
         const overall = failed > 0 || errors > 0 ? 'FAIL' : warnings > 0 ? 'WARNING' : 'PASS';
 
+        const validLufs = localFileResults
+          .map(f => f.loudness?.integrated_lufs)
+          .filter((v): v is number => typeof v === 'number' && !isNaN(v) && v > -70.0);
+        const avgLufs = validLufs.length > 0 
+          ? Math.round((validLufs.reduce((a, b) => a + b, 0) / validLufs.length) * 10) / 10 
+          : null;
+
+        const validTruePeaks = localFileResults
+          .map(f => f.peaks?.true_peak_dbtp ?? f.peaks?.sample_peak_dbfs)
+          .filter((v): v is number => typeof v === 'number' && !isNaN(v));
+        const maxTruePeak = validTruePeaks.length > 0 ? Math.max(...validTruePeaks) : null;
+
         const syntheticBatch: BatchQCResult = {
           batch_id: `batch_local_${Date.now()}`,
           created_at: new Date().toISOString(),
@@ -251,8 +285,8 @@ export default function CheckPage() {
             warnings,
             failed,
             errors,
-            avg_lufs: null,
-            highest_true_peak_dbtp: Math.max(...localFileResults.map(f => f.peaks?.sample_peak_dbfs ?? -99)),
+            avg_lufs: avgLufs,
+            highest_true_peak_dbtp: maxTruePeak,
             total_duration_seconds: localFileResults.reduce((acc, f) => acc + (f.file_info?.duration_seconds ?? 0), 0),
             batch_health: overall === 'FAIL' ? 'CRITICAL_ISSUES' : overall === 'WARNING' ? 'NEEDS_ATTENTION' : 'HEALTHY',
             batch_health_reasons: []

@@ -1,6 +1,8 @@
 import { BatchQCResult, FileQCResult, QCProfile } from '@/types/qc';
 import { ProductTier } from '@/config/tiers';
 
+export type EngineMode = 'LOCAL' | 'SERVER';
+
 const AUDIO_ENGINE_URL = process.env.NEXT_PUBLIC_AUDIO_ENGINE_URL || 'http://localhost:8000';
 
 export const DEFAULT_QC_PROFILES: QCProfile[] = [
