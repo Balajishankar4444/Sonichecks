@@ -13,10 +13,11 @@ import {
   Layers, 
   Table, 
   LayoutGrid, 
-  ListOrdered 
+  ListOrdered,
+  Cpu
 } from 'lucide-react';
 import AudioDropzone from '@/components/upload/AudioDropzone';
-import FileQueueList from '@/components/upload/FileQueueList';
+import FileQueueList, { AnalysisEngineMode } from '@/components/upload/FileQueueList';
 import LoadingSteps, { FileAnalysisStatus } from '@/components/common/LoadingSteps';
 import BatchSummaryCard from '@/components/results/BatchSummaryCard';
 import ConsistencyAlertBanner from '@/components/results/ConsistencyAlertBanner';
@@ -31,12 +32,15 @@ import { getQCProfiles, analyzeBatchFiles, analyzeSingleFile } from '@/lib/api';
 import { saveBatchToHistory, getUsageState, UsageState } from '@/lib/storage';
 import { ProductTier, TIER_CONFIGS, getTierConfig } from '@/config/tiers';
 import { useAuth } from '@/context/AuthContext';
+import { analyzeWavFileLocally } from '@/lib/audio-engine/client';
+import { convertLocalMeasurementsToFileQCResult } from '@/lib/audio-engine/adapter';
 
 export default function CheckPage() {
   const { user, openAuthModal } = useAuth();
   const [files, setFiles] = useState<File[]>([]);
   const [profiles, setProfiles] = useState<QCProfile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<QCProfile | null>(null);
+  const [engineMode, setEngineMode] = useState<AnalysisEngineMode>('LOCAL');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [batchResult, setBatchResult] = useState<BatchQCResult | null>(null);
@@ -99,7 +103,6 @@ export default function CheckPage() {
         'Batch QC is available on Pro. Upgrade to Pro to analyze up to 50 files at once.',
         'PRO'
       );
-      // Keep only first file for Free user
       setFiles(newFiles.slice(0, 1));
       return;
     }
@@ -158,7 +161,6 @@ export default function CheckPage() {
     // Login requirement: prompt to login if not authenticated
     if (!user) {
       openAuthModal(() => {
-        // Will auto resume once logged in
         setTimeout(() => {
           handleStartAnalysis();
         }, 150);
@@ -201,76 +203,137 @@ export default function CheckPage() {
     abortControllerRef.current = new AbortController();
 
     try {
-      if (files.length === 1) {
-        // Single file QC
-        setCurrentFilename(files[0].name);
-        setFileStatuses([{ filename: files[0].name, status: 'ANALYZING' }]);
-        
-        const singleResult = await analyzeSingleFile(
-          files[0],
-          selectedProfile.profile_id,
-          abortControllerRef.current.signal,
-          userTier
-        );
+      if (engineMode === 'LOCAL') {
+        // === LOCAL BROWSER DSP ENGINE (WEB WORKER) ===
+        const localFileResults: FileQCResult[] = [];
+
+        for (let i = 0; i < files.length; i++) {
+          if (abortControllerRef.current.signal.aborted) {
+            throw new Error('Analysis aborted by user.');
+          }
+
+          const file = files[i];
+          setCurrentFilename(file.name);
+          setFileStatuses((prev) =>
+            prev.map((s, idx) => (idx === i ? { ...s, status: 'ANALYZING' } : s))
+          );
+
+          // Local in-browser DSP analysis
+          const measurements = await analyzeWavFileLocally(file, (stage, message, percent) => {
+            // Optional fine-grained progress
+          });
+
+          const fileQcResult = convertLocalMeasurementsToFileQCResult(measurements, selectedProfile);
+          localFileResults.push(fileQcResult);
+
+          setCompletedCount(i + 1);
+          setFileStatuses((prev) =>
+            prev.map((s, idx) => (idx === i ? { ...s, status: 'DONE', qcResultStatus: fileQcResult.overall_status } : s))
+          );
+        }
+
+        const passed = localFileResults.filter((f) => f.overall_status === 'PASS').length;
+        const warnings = localFileResults.filter((f) => f.overall_status === 'WARNING').length;
+        const failed = localFileResults.filter((f) => f.overall_status === 'FAIL').length;
+        const errors = localFileResults.filter((f) => f.overall_status === 'ERROR').length;
+        const overall = failed > 0 || errors > 0 ? 'FAIL' : warnings > 0 ? 'WARNING' : 'PASS';
 
         const syntheticBatch: BatchQCResult = {
-          batch_id: singleResult.file_id,
+          batch_id: `batch_local_${Date.now()}`,
           created_at: new Date().toISOString(),
           profile_id: selectedProfile.profile_id,
           profile_name: selectedProfile.name,
-          files: [singleResult],
+          files: localFileResults,
           consistency_issues: [],
           summary: {
-            total_files: 1,
-            passed: singleResult.overall_status === 'PASS' ? 1 : 0,
-            warnings: singleResult.overall_status === 'WARNING' ? 1 : 0,
-            failed: singleResult.overall_status === 'FAIL' ? 1 : 0,
-            errors: singleResult.overall_status === 'ERROR' ? 1 : 0,
-            avg_lufs: singleResult.loudness?.integrated_lufs ?? null,
-            highest_true_peak_dbtp: singleResult.peaks?.true_peak_dbtp ?? null,
-            total_duration_seconds: singleResult.file_info?.duration_seconds ?? 0,
-            batch_health: singleResult.overall_status === 'FAIL' ? 'CRITICAL_ISSUES' : singleResult.overall_status === 'WARNING' ? 'NEEDS_ATTENTION' : 'HEALTHY',
+            total_files: localFileResults.length,
+            passed,
+            warnings,
+            failed,
+            errors,
+            avg_lufs: null,
+            highest_true_peak_dbtp: Math.max(...localFileResults.map(f => f.peaks?.sample_peak_dbfs ?? -99)),
+            total_duration_seconds: localFileResults.reduce((acc, f) => acc + (f.file_info?.duration_seconds ?? 0), 0),
+            batch_health: overall === 'FAIL' ? 'CRITICAL_ISSUES' : overall === 'WARNING' ? 'NEEDS_ATTENTION' : 'HEALTHY',
             batch_health_reasons: []
           },
-          overall_status: singleResult.overall_status
+          overall_status: overall
         };
 
-        setCompletedCount(1);
-        setFileStatuses([{ filename: files[0].name, status: 'DONE', qcResultStatus: singleResult.overall_status }]);
         setBatchResult(syntheticBatch);
         saveBatchToHistory(syntheticBatch, user?.email || undefined);
         setUsage(getUsageState(user?.email || undefined));
       } else {
-        // Multi-file batch QC (Pro / Studio)
-        const ticker = setInterval(() => {
-          setCompletedCount((prev) => {
-            const next = Math.min(files.length - 1, prev + 1);
-            if (next < files.length) {
-              setCurrentFilename(files[next]?.name);
-              setFileStatuses((statuses) =>
-                statuses.map((s, idx) => {
-                  if (idx < next) return { ...s, status: 'DONE' };
-                  if (idx === next) return { ...s, status: 'ANALYZING' };
-                  return s;
-                })
-              );
-            }
-            return next;
-          });
-        }, 400);
+        // === SERVER PYTHON / FASTAPI REFERENCE ENGINE ===
+        if (files.length === 1) {
+          setCurrentFilename(files[0].name);
+          setFileStatuses([{ filename: files[0].name, status: 'ANALYZING' }]);
+          
+          const singleResult = await analyzeSingleFile(
+            files[0],
+            selectedProfile.profile_id,
+            abortControllerRef.current.signal,
+            userTier
+          );
 
-        const result = await analyzeBatchFiles(
-          files,
-          selectedProfile.profile_id,
-          abortControllerRef.current.signal,
-          userTier
-        );
-        clearInterval(ticker);
+          const syntheticBatch: BatchQCResult = {
+            batch_id: singleResult.file_id,
+            created_at: new Date().toISOString(),
+            profile_id: selectedProfile.profile_id,
+            profile_name: selectedProfile.name,
+            files: [singleResult],
+            consistency_issues: [],
+            summary: {
+              total_files: 1,
+              passed: singleResult.overall_status === 'PASS' ? 1 : 0,
+              warnings: singleResult.overall_status === 'WARNING' ? 1 : 0,
+              failed: singleResult.overall_status === 'FAIL' ? 1 : 0,
+              errors: singleResult.overall_status === 'ERROR' ? 1 : 0,
+              avg_lufs: singleResult.loudness?.integrated_lufs ?? null,
+              highest_true_peak_dbtp: singleResult.peaks?.true_peak_dbtp ?? null,
+              total_duration_seconds: singleResult.file_info?.duration_seconds ?? 0,
+              batch_health: singleResult.overall_status === 'FAIL' ? 'CRITICAL_ISSUES' : singleResult.overall_status === 'WARNING' ? 'NEEDS_ATTENTION' : 'HEALTHY',
+              batch_health_reasons: []
+            },
+            overall_status: singleResult.overall_status
+          };
 
-        setCompletedCount(files.length);
-        setBatchResult(result);
-        saveBatchToHistory(result, user?.email || undefined);
-        setUsage(getUsageState(user?.email || undefined));
+          setCompletedCount(1);
+          setFileStatuses([{ filename: files[0].name, status: 'DONE', qcResultStatus: singleResult.overall_status }]);
+          setBatchResult(syntheticBatch);
+          saveBatchToHistory(syntheticBatch, user?.email || undefined);
+          setUsage(getUsageState(user?.email || undefined));
+        } else {
+          const ticker = setInterval(() => {
+            setCompletedCount((prev) => {
+              const next = Math.min(files.length - 1, prev + 1);
+              if (next < files.length) {
+                setCurrentFilename(files[next]?.name);
+                setFileStatuses((statuses) =>
+                  statuses.map((s, idx) => {
+                    if (idx < next) return { ...s, status: 'DONE' };
+                    if (idx === next) return { ...s, status: 'ANALYZING' };
+                    return s;
+                  })
+                );
+              }
+              return next;
+            });
+          }, 400);
+
+          const result = await analyzeBatchFiles(
+            files,
+            selectedProfile.profile_id,
+            abortControllerRef.current.signal,
+            userTier
+          );
+          clearInterval(ticker);
+
+          setCompletedCount(files.length);
+          setBatchResult(result);
+          saveBatchToHistory(result, user?.email || undefined);
+          setUsage(getUsageState(user?.email || undefined));
+        }
       }
     } catch (err: any) {
       if (err.name === 'AbortError' || err.message?.includes('aborted')) {
@@ -279,7 +342,7 @@ export default function CheckPage() {
       } else {
         console.error('Analysis error:', err);
         setErrorMessage(
-          err.message || 'Unable to complete analysis. Please verify your files and ensure the audio engine is running.'
+          err.message || 'Unable to complete analysis. Please verify your audio files.'
         );
       }
     } finally {
@@ -298,7 +361,13 @@ export default function CheckPage() {
 
     setRetryingFilename(filename);
     try {
-      const updatedResult = await analyzeSingleFile(fileObj, selectedProfile.profile_id, undefined, userTier);
+      let updatedResult: FileQCResult;
+      if (engineMode === 'LOCAL') {
+        const measurements = await analyzeWavFileLocally(fileObj);
+        updatedResult = convertLocalMeasurementsToFileQCResult(measurements, selectedProfile);
+      } else {
+        updatedResult = await analyzeSingleFile(fileObj, selectedProfile.profile_id, undefined, userTier);
+      }
       
       setBatchResult((prev) => {
         if (!prev) return null;
@@ -418,9 +487,18 @@ export default function CheckPage() {
       <div className="max-w-6xl mx-auto space-y-8">
         {/* Top Tier & Plan Status Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-900">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold">
-            <AudioWaveform className="w-3.5 h-3.5" />
-            <span>Sonichecks &bull; Audio Quality Control Engine</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold">
+              <AudioWaveform className="w-3.5 h-3.5" />
+              <span>Sonichecks &bull; Audio Quality Control Engine</span>
+            </div>
+
+            {engineMode === 'LOCAL' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold">
+                <Cpu className="w-3 h-3" />
+                <span>Zero Upload / Local DSP</span>
+              </span>
+            )}
           </div>
 
           <TierBadgeSelector />
@@ -433,7 +511,7 @@ export default function CheckPage() {
           </h1>
           <p className="text-slate-400 text-sm sm:text-base max-w-2xl mx-auto">
             {userTier === 'FREE' ? (
-              <>Inspect individual master tracks with real deterministic DSP signal analysis. (Free Tier: 1 file at a time).</>
+              <>Inspect individual master tracks with deterministic DSP signal analysis. (Free Tier: 1 file at a time).</>
             ) : (
               <>Analyze up to {tierConfig.maxBatchSize} audio files concurrently with multi-track batch matrix alignment.</>
             )}
@@ -604,6 +682,8 @@ export default function CheckPage() {
                 selectedProfile={selectedProfile}
                 availableProfiles={profiles}
                 onSelectProfile={setSelectedProfile}
+                engineMode={engineMode}
+                onSelectEngineMode={setEngineMode}
               />
             )}
           </div>
@@ -621,7 +701,7 @@ export default function CheckPage() {
               <button
                 type="button"
                 onClick={() => setSelectedInspectFile(null)}
-                className="px-3 py-1 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                className="px-3 py-1 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
               >
                 &larr; Return to Matrix
               </button>
@@ -633,7 +713,7 @@ export default function CheckPage() {
               <button
                 type="button"
                 onClick={() => setSelectedInspectFile(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors"
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors cursor-pointer"
               >
                 Close Inspector
               </button>

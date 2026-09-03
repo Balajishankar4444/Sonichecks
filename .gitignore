@@ -23,6 +23,7 @@ htmlcov/
 # Sonichecks Temporary Uploads & Artifacts
 tmp_uploads/
 */tmp_uploads/
+tmp_parity_fixtures/
 *.pdf
 *.csv
 !app/

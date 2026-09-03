@@ -1,9 +1,11 @@
 'use client';
 
 import React from 'react';
-import { FileAudio, Trash2, ShieldCheck, Sparkles, X, Layers, AlertTriangle } from 'lucide-react';
+import { FileAudio, Trash2, ShieldCheck, Sparkles, X, Layers, AlertTriangle, Cpu, Server } from 'lucide-react';
 import { QCProfile } from '@/types/qc';
 import { MAX_BATCH_SIZE } from '@/config/batch';
+
+export type AnalysisEngineMode = 'LOCAL' | 'SERVER';
 
 interface FileQueueListProps {
   files: File[];
@@ -15,6 +17,8 @@ interface FileQueueListProps {
   selectedProfile: QCProfile;
   availableProfiles: QCProfile[];
   onSelectProfile: (profile: QCProfile) => void;
+  engineMode: AnalysisEngineMode;
+  onSelectEngineMode: (mode: AnalysisEngineMode) => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -34,7 +38,9 @@ export default function FileQueueList({
   isAnalyzing,
   selectedProfile,
   availableProfiles,
-  onSelectProfile
+  onSelectProfile,
+  engineMode,
+  onSelectEngineMode
 }: FileQueueListProps) {
   if (files.length === 0) return null;
 
@@ -87,6 +93,48 @@ export default function FileQueueList({
             className="text-xs text-slate-400 hover:text-rose-400 px-2 py-1 rounded hover:bg-slate-800 transition-colors ml-1"
           >
             Clear All
+          </button>
+        </div>
+      </div>
+
+      {/* Engine Selection Bar */}
+      <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <span className="text-xs font-bold text-white flex items-center gap-1.5">
+            <span>Analysis Engine</span>
+          </span>
+          <p className="text-[11px] text-slate-400">
+            {engineMode === 'LOCAL' 
+              ? 'Local Web Worker DSP engine. Audio is analyzed directly in your browser without uploading to any server.'
+              : 'Python / FastAPI reference microservice. Full ITU-R BS.1770-4 LUFS and 4x True Peak.'}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => onSelectEngineMode('LOCAL')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              engineMode === 'LOCAL'
+                ? 'bg-gradient-to-r from-cyan-400 to-blue-500 text-slate-950 font-bold shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Cpu className="w-3.5 h-3.5" />
+            <span>Local Browser (No Upload)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSelectEngineMode('SERVER')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              engineMode === 'SERVER'
+                ? 'bg-slate-800 text-cyan-300 font-bold border border-slate-700 shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Server className="w-3.5 h-3.5" />
+            <span>Python Reference</span>
           </button>
         </div>
       </div>
@@ -165,7 +213,7 @@ export default function FileQueueList({
                 type="button"
                 onClick={() => onRemoveFile(idx)}
                 disabled={isAnalyzing}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors flex-shrink-0"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors flex-shrink-0 cursor-pointer"
                 title="Remove file"
               >
                 <X className="w-4 h-4" />
@@ -181,11 +229,13 @@ export default function FileQueueList({
           type="button"
           onClick={onStartAnalysis}
           disabled={isAnalyzing || files.length === 0}
-          className="w-full py-3.5 px-6 rounded-xl font-bold text-base text-slate-950 bg-gradient-to-r from-cyan-400 via-sky-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-lg shadow-cyan-500/25 active:scale-[0.99] transition-all flex items-center justify-center gap-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full py-3.5 px-6 rounded-xl font-bold text-base text-slate-950 bg-gradient-to-r from-cyan-400 via-sky-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-lg shadow-cyan-500/25 active:scale-[0.99] transition-all flex items-center justify-center gap-2.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
           <ShieldCheck className="w-5 h-5 stroke-[2.5]" />
           <span>
-            {files.length === 1 ? 'Analyze 1 File' : `Analyze ${files.length} Files`}
+            {engineMode === 'LOCAL' 
+              ? (files.length === 1 ? 'Analyze 1 File (Local Browser DSP)' : `Analyze ${files.length} Files (Local Browser DSP)`)
+              : (files.length === 1 ? 'Analyze 1 File (Server Engine)' : `Analyze ${files.length} Files (Server Engine)`)}
           </span>
         </button>
       </div>
