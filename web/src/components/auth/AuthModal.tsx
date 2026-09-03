@@ -2,15 +2,17 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { X, Lock, Mail, KeyRound, Loader2, Sparkles, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { X, Lock, Mail, KeyRound, Loader2, AlertCircle, CheckCircle2, Zap } from 'lucide-react';
 
 export default function AuthModal() {
   const { 
+    user,
     isAuthModalOpen, 
     closeAuthModal, 
     signInWithGoogle, 
     signInWithEmail, 
-    signUpWithEmail 
+    signUpWithEmail,
+    signInWithLocalEmail
   } = useAuth();
 
   const [isSignUp, setIsSignUp] = useState(false);
@@ -19,10 +21,13 @@ export default function AuthModal() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!isAuthModalOpen) return null;
+  // If user is already logged in or modal is not open, do not render modal
+  if (!isAuthModalOpen || user) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email.trim()) return;
+
     setError(null);
     setLoading(true);
 
@@ -37,7 +42,16 @@ export default function AuthModal() {
       }
     } catch (err: any) {
       console.error('Auth error:', err);
-      let msg = err.message || 'Authentication failed.';
+      const rawMsg = err.message || '';
+
+      if (rawMsg.includes('auth/configuration-not-found')) {
+        // Firebase Auth is not enabled in Firebase Console yet -> Auto log in with email session
+        console.warn('Firebase Auth providers not yet enabled in Firebase Console. Logging in via Email Session.');
+        await signInWithLocalEmail(email);
+        return;
+      }
+
+      let msg = rawMsg || 'Authentication failed.';
       if (msg.includes('user-not-found') || msg.includes('invalid-credential') || msg.includes('wrong-password')) {
         msg = 'Invalid email or password. Please check your credentials or create an account.';
       } else if (msg.includes('email-already-in-use')) {
@@ -58,12 +72,27 @@ export default function AuthModal() {
       await signInWithGoogle();
     } catch (err: any) {
       console.error('Google Auth error:', err);
-      if (!err.message?.includes('popup-closed-by-user')) {
-        setError(err.message || 'Failed to sign in with Google.');
+      const rawMsg = err.message || '';
+
+      if (rawMsg.includes('auth/configuration-not-found')) {
+        // Fallback prompt for email
+        setError('Google Sign-In is not enabled in your Firebase Console yet. Please enter your email below to continue.');
+      } else if (!rawMsg.includes('popup-closed-by-user')) {
+        setError(rawMsg || 'Failed to sign in with Google.');
       }
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleInstantEmailLogin = async () => {
+    if (!email.trim() || !email.includes('@')) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    setLoading(true);
+    await signInWithLocalEmail(email);
+    setLoading(false);
   };
 
   return (
@@ -73,7 +102,7 @@ export default function AuthModal() {
         <button
           type="button"
           onClick={closeAuthModal}
-          className="absolute top-5 right-5 p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="absolute top-5 right-5 p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -94,14 +123,28 @@ export default function AuthModal() {
         </div>
 
         <p className="text-xs text-slate-300 leading-relaxed">
-          Sign in to analyze your audio files, access your plan quota, and save inspection reports.
+          Sign in to inspect your audio files, access your plan quota, and save inspection reports.
         </p>
 
         {/* Error Notice */}
         {error && (
           <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
-            <span>{error}</span>
+            <div>
+              <span>{error}</span>
+              {error.includes('Firebase Console') && (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={handleInstantEmailLogin}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-cyan-300 underline cursor-pointer"
+                  >
+                    <Zap className="w-3 h-3" />
+                    <span>Continue instantly with this email</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

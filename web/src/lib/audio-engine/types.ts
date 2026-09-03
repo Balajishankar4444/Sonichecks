@@ -32,19 +32,31 @@ export interface LocalAudioMeasurements {
   fileSizeBytes: number;
   sha256Hash: string;
   metadata: WavMetadata;
+  // Loudness (ITU-R BS.1770-4)
+  integratedLufs: number;
+  momentaryMaxLufs: number | null;
+  shortTermMaxLufs: number | null;
+  loudnessRangeLu: number | null;
+  // Peaks & True Peak (4x Oversampled)
   samplePeakLinear: number;
   samplePeakDbfs: number;
+  truePeakLinear: number;
+  truePeakDbtp: number;
+  isClippingRisk: boolean;
+  // RMS & DC Offset
   rmsLinear: number;
   rmsDbfs: number;
   dcOffsetLinear: number;
   dcOffsetPercent: number;
   channelMetrics: ChannelMetrics[];
+  // Clipping
   clipping: {
     clippingDetected: boolean;
     clippedSamples: number;
     consecutiveClippedRuns: number;
     maxConsecutiveClipped: number;
   };
+  // Silence
   silence: {
     leadingSilenceSec: number;
     trailingSilenceSec: number;
@@ -63,6 +75,8 @@ export type WorkerProgressStage =
   | 'READING_FILE'
   | 'PARSING_WAV'
   | 'ANALYZING_METRICS'
+  | 'ANALYZING_LUFS'
+  | 'ANALYZING_TRUE_PEAK'
   | 'COMPLETE'
   | 'ERROR';
 

@@ -5,7 +5,21 @@ export function convertLocalMeasurementsToFileQCResult(
   measurements: LocalAudioMeasurements,
   profile: QCProfile
 ): FileQCResult {
-  const { metadata, samplePeakDbfs, samplePeakLinear, rmsDbfs, dcOffsetPercent, clipping, silence, filename, sha256Hash } = measurements;
+  const { 
+    metadata, 
+    samplePeakDbfs, 
+    samplePeakLinear, 
+    truePeakDbtp, 
+    truePeakLinear,
+    integratedLufs,
+    momentaryMaxLufs,
+    shortTermMaxLufs,
+    loudnessRangeLu,
+    clipping, 
+    silence, 
+    filename, 
+    sha256Hash 
+  } = measurements;
   const { rules } = profile;
 
   const checks: QCRuleCheck[] = [];
@@ -67,31 +81,74 @@ export function convertLocalMeasurementsToFileQCResult(
     });
   }
 
-  // 4. Sample Peak Check
-  const maxSamplePeak = rules.max_sample_peak_dbfs ?? -0.1;
-  const isSamplePeakOk = samplePeakDbfs <= maxSamplePeak + 0.05;
-  const peakStatus: QCStatus = isSamplePeakOk ? 'PASS' : (samplePeakDbfs > 0.0 ? 'FAIL' : 'WARNING');
+  // 4. Integrated LUFS Loudness Check (BS.1770-4)
+  if (rules.min_lufs !== undefined && rules.min_lufs !== null && rules.max_lufs !== undefined && rules.max_lufs !== null) {
+    const minLufs = rules.min_lufs;
+    const maxLufs = rules.max_lufs;
+    const isLufsCompliant = integratedLufs >= minLufs && integratedLufs <= maxLufs;
 
-  if (!isSamplePeakOk) {
-    fixSummary.push(`Lower master output gain to bring sample peak below ${maxSamplePeak} dBFS (currently ${samplePeakDbfs} dBFS).`);
+    let lufsStatus: QCStatus = 'PASS';
+    if (!isLufsCompliant) {
+      const diff = integratedLufs < minLufs ? minLufs - integratedLufs : integratedLufs - maxLufs;
+      lufsStatus = diff > 3.0 ? 'FAIL' : 'WARNING';
+      const adj = Math.abs(diff).toFixed(1);
+      fixSummary.push(`Adjust integrated loudness by ${integratedLufs > maxLufs ? '-' : '+'}${adj} dB to fall within ${minLufs} to ${maxLufs} LUFS.`);
+    }
+
+    checks.push({
+      name: 'Integrated Loudness (LUFS)',
+      status: lufsStatus,
+      value: `${integratedLufs.toFixed(1)} LUFS`,
+      limit: `${minLufs.toFixed(1)} to ${maxLufs.toFixed(1)} LUFS`,
+      unit: 'LUFS',
+      message: isLufsCompliant
+        ? `Integrated loudness (${integratedLufs.toFixed(1)} LUFS) meets delivery target.`
+        : `Integrated loudness (${integratedLufs.toFixed(1)} LUFS) is outside target window (${minLufs.toFixed(1)} to ${maxLufs.toFixed(1)} LUFS).`,
+      fix_recommendation: isLufsCompliant ? undefined : `Apply gain adjustment to achieve target range (${minLufs} to ${maxLufs} LUFS).`
+    });
+  }
+
+  // 5. True Peak Level (dBTP 4x Oversampled)
+  const maxTruePeak = rules.max_true_peak_dbtp ?? -1.0;
+  const isTruePeakOk = truePeakDbtp <= maxTruePeak + 0.05;
+  const truePeakStatus: QCStatus = isTruePeakOk ? 'PASS' : (truePeakDbtp > 0.0 ? 'FAIL' : 'WARNING');
+
+  if (!isTruePeakOk) {
+    fixSummary.push(`Lower True Peak limiter ceiling below ${maxTruePeak} dBTP (currently ${truePeakDbtp} dBTP).`);
   }
 
   checks.push({
+    name: 'True Peak Level (dBTP)',
+    status: truePeakStatus,
+    value: `${truePeakDbtp} dBTP`,
+    limit: `≤ ${maxTruePeak} dBTP`,
+    unit: 'dBTP',
+    message: isTruePeakOk
+      ? `True peak (${truePeakDbtp} dBTP) has sufficient inter-sample headroom.`
+      : `True peak (${truePeakDbtp} dBTP) exceeds ${maxTruePeak} dBTP ceiling.`,
+    fix_recommendation: isTruePeakOk ? undefined : `Set True Peak limiter ceiling to ${maxTruePeak} dBTP.`
+  });
+
+  // 6. Sample Peak Check
+  const maxSamplePeak = rules.max_sample_peak_dbfs ?? -0.1;
+  const isSamplePeakOk = samplePeakDbfs <= maxSamplePeak + 0.05;
+  const samplePeakStatus: QCStatus = isSamplePeakOk ? 'PASS' : (samplePeakDbfs > 0.0 ? 'FAIL' : 'WARNING');
+
+  checks.push({
     name: 'Sample Peak Level',
-    status: peakStatus,
+    status: samplePeakStatus,
     value: `${samplePeakDbfs} dBFS`,
     limit: `≤ ${maxSamplePeak} dBFS`,
     unit: 'dBFS',
     message: isSamplePeakOk
       ? `Sample peak of ${samplePeakDbfs} dBFS has safe digital headroom.`
-      : `Sample peak of ${samplePeakDbfs} dBFS exceeds ${maxSamplePeak} dBFS ceiling.`,
-    fix_recommendation: isSamplePeakOk ? undefined : `Apply a limiter ceiling of ${maxSamplePeak} dBFS.`
+      : `Sample peak of ${samplePeakDbfs} dBFS exceeds ${maxSamplePeak} dBFS ceiling.`
   });
 
-  // 5. Digital Hard Clipping Check
+  // 7. Digital Hard Clipping Check
   const clippingStatus: QCStatus = clipping.clippingDetected ? 'FAIL' : 'PASS';
   if (clipping.clippingDetected) {
-    fixSummary.push(`Digital hard clipping detected (${clipping.clippedSamples} flat-topped samples). Lower master gain or adjust limiter.`);
+    fixSummary.push(`Digital hard clipping detected (${clipping.clippedSamples} flat-topped samples). Lower master gain.`);
   }
 
   checks.push({
@@ -102,11 +159,10 @@ export function convertLocalMeasurementsToFileQCResult(
     unit: 'samples',
     message: clipping.clippingDetected
       ? `Detected ${clipping.clippedSamples} hard clipped samples across ${clipping.consecutiveClippedRuns} consecutive runs.`
-      : 'No digital flat-top clipping detected.',
-    fix_recommendation: clipping.clippingDetected ? 'Reduce gain by at least 1.0 dB before the final limiter stage.' : undefined
+      : 'No digital flat-top clipping detected.'
   });
 
-  // 6. Silence & Truncation Check
+  // 8. Silence & Truncation Check
   const maxLeading = rules.max_leading_silence_sec ?? 1.0;
   const maxTrailing = rules.max_trailing_silence_sec ?? 3.0;
   const isSilenceOk = !silence.isCompletelySilent && silence.leadingSilenceSec <= maxLeading && silence.trailingSilenceSec <= maxTrailing;
@@ -131,11 +187,10 @@ export function convertLocalMeasurementsToFileQCResult(
     unit: 'sec',
     message: isSilenceOk
       ? `Leading silence (${silence.leadingSilenceSec}s) and trailing silence (${silence.trailingSilenceSec}s) are within standard thresholds.`
-      : `Silence boundaries exceed limits (Head: ${silence.leadingSilenceSec}s, Tail: ${silence.trailingSilenceSec}s).`,
-    fix_recommendation: isSilenceOk ? undefined : 'Trim dead air at start and end of track.'
+      : `Silence boundaries exceed limits (Head: ${silence.leadingSilenceSec}s, Tail: ${silence.trailingSilenceSec}s).`
   });
 
-  // 7. Overall Verdict
+  // 9. Overall Verdict
   const hasFail = checks.some(c => c.status === 'FAIL');
   const hasWarn = checks.some(c => c.status === 'WARNING');
   const overallStatus: QCStatus = hasFail ? 'FAIL' : (hasWarn ? 'WARNING' : 'PASS');
@@ -157,17 +212,17 @@ export function convertLocalMeasurementsToFileQCResult(
       sha256_hash: sha256Hash
     },
     loudness: {
-      integrated_lufs: null, // Deferred to Phase 2
-      short_term_max_lufs: null,
-      momentary_max_lufs: null,
-      loudness_range_lu: null
+      integrated_lufs: integratedLufs,
+      short_term_max_lufs: shortTermMaxLufs,
+      momentary_max_lufs: momentaryMaxLufs,
+      loudness_range_lu: loudnessRangeLu
     },
     peaks: {
       sample_peak_dbfs: samplePeakDbfs,
-      true_peak_dbtp: samplePeakDbfs, // In Phase 1 browser engine, true peak is approximated by sample peak until polyphase resampler is ported
+      true_peak_dbtp: truePeakDbtp,
       sample_peak_linear: samplePeakLinear,
-      true_peak_linear: samplePeakLinear,
-      is_clipping_risk: samplePeakDbfs >= -0.05
+      true_peak_linear: truePeakLinear,
+      is_clipping_risk: measurements.isClippingRisk
     },
     clipping: {
       clipping_detected: clipping.clippingDetected,

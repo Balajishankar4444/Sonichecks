@@ -28,6 +28,8 @@ export async function analyzeWavFileLocally(
         PARSING_WAV: 'Parsing WAV header & PCM audio streams...',
         HASHING_FILE: 'Calculating cryptographic SHA-256 hash...',
         ANALYZING_METRICS: 'Calculating DSP sample peaks, RMS energy, DC offset, clipping & silence...',
+        ANALYZING_LUFS: 'Measuring ITU-R BS.1770-4 K-weighted Integrated LUFS...',
+        ANALYZING_TRUE_PEAK: 'Calculating 4x oversampled polyphase True Peak (dBTP)...',
         COMPLETE: 'Local analysis complete.'
       };
       onProgress(stage, messages[stage] || stage, percent);
@@ -51,9 +53,8 @@ function analyzeWithWorker(
         self.onmessage = async function(e) {
           const { buffer, filename } = e.data;
           try {
-            self.postMessage({ type: 'PROGRESS', stage: 'PARSING_WAV', message: 'Parsing WAV structure...', progressPercent: 25 });
+            self.postMessage({ type: 'PROGRESS', stage: 'PARSING_WAV', message: 'Parsing WAV structure...', progressPercent: 15 });
             
-            // Minimal in-worker parser and DSP calculation
             const view = new DataView(buffer);
             const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
             if (riff !== 'RIFF') throw new Error('Invalid WAV file (not RIFF)');
@@ -80,8 +81,6 @@ function analyzeWithWorker(
             }
 
             if (!dataOffset) throw new Error('Missing data chunk in WAV');
-
-            self.postMessage({ type: 'PROGRESS', stage: 'ANALYZING_METRICS', message: 'Analyzing peaks, RMS, DC offset, clipping & silence...', progressPercent: 60 });
 
             const bytesPerSample = bitDepth / 8;
             const numSamples = Math.floor(dataSize / (channels * bytesPerSample));
@@ -129,6 +128,8 @@ function analyzeWithWorker(
                 }
               }
             }
+
+            self.postMessage({ type: 'PROGRESS', stage: 'ANALYZING_METRICS', message: 'Analyzing peaks, RMS, DC offset, clipping & silence...', progressPercent: 45 });
 
             // DSP Metrics calculation
             let globalPeakLinear = 0.0, totalSumSquares = 0.0, totalSumSamples = 0.0;
@@ -208,6 +209,163 @@ function analyzeWithWorker(
               }
             }
 
+            // === ITU-R BS.1770-4 LUFS Calculation ===
+            self.postMessage({ type: 'PROGRESS', stage: 'ANALYZING_LUFS', message: 'Measuring ITU-R BS.1770-4 Integrated LUFS...', progressPercent: 65 });
+            
+            // K-weighting filter coefficients
+            const G_hs = 4.0, Q_hs = 1.0 / Math.SQRT2, fc_hs = 1500.0;
+            const A_hs = Math.pow(10.0, G_hs / 40.0);
+            const w0_hs = 2.0 * Math.PI * (fc_hs / sampleRate);
+            const alpha_hs = Math.sin(w0_hs) / (2.0 * Q_hs);
+            const cos_w0_hs = Math.cos(w0_hs);
+            const a0_hs = (A_hs + 1) - (A_hs - 1) * cos_w0_hs + 2 * Math.sqrt(A_hs) * alpha_hs;
+            const hs_b0 = (A_hs * ((A_hs + 1) + (A_hs - 1) * cos_w0_hs + 2 * Math.sqrt(A_hs) * alpha_hs)) / a0_hs;
+            const hs_b1 = (-2 * A_hs * ((A_hs - 1) + (A_hs + 1) * cos_w0_hs)) / a0_hs;
+            const hs_b2 = (A_hs * ((A_hs + 1) + (A_hs - 1) * cos_w0_hs - 2 * Math.sqrt(A_hs) * alpha_hs)) / a0_hs;
+            const hs_a1 = (2 * ((A_hs - 1) - (A_hs + 1) * cos_w0_hs)) / a0_hs;
+            const hs_a2 = ((A_hs + 1) - (A_hs - 1) * cos_w0_hs - 2 * Math.sqrt(A_hs) * alpha_hs) / a0_hs;
+
+            const fc_hp = 38.0, Q_hp = 0.5;
+            const w0_hp = 2.0 * Math.PI * (fc_hp / sampleRate);
+            const alpha_hp = Math.sin(w0_hp) / (2.0 * Q_hp);
+            const cos_w0_hp = Math.cos(w0_hp);
+            const a0_hp = 1.0 + alpha_hp;
+            const hp_b0 = ((1.0 + cos_w0_hp) / 2.0) / a0_hp;
+            const hp_b1 = (-(1.0 + cos_w0_hp)) / a0_hp;
+            const hp_b2 = ((1.0 + cos_w0_hp) / 2.0) / a0_hp;
+            const hp_a1 = (-2.0 * cos_w0_hp) / a0_hp;
+            const hp_a2 = (1.0 - alpha_hp) / a0_hp;
+
+            const filteredChannels = [];
+            for (let c = 0; c < channels; c++) {
+              const src = channelBuffers[c];
+              const f = new Float32Array(numSamples);
+              // Apply High-Shelf
+              let d0 = 0, d1 = 0;
+              for (let i = 0; i < numSamples; i++) {
+                const x = src[i];
+                const y = hs_b0 * x + d0;
+                d0 = hs_b1 * x - hs_a1 * y + d1;
+                d1 = hs_b2 * x - hs_a2 * y;
+                f[i] = y;
+              }
+              // Apply High-Pass RLB
+              d0 = 0; d1 = 0;
+              for (let i = 0; i < numSamples; i++) {
+                const x = f[i];
+                const y = hp_b0 * x + d0;
+                d0 = hp_b1 * x - hp_a1 * y + d1;
+                d1 = hp_b2 * x - hp_a2 * y;
+                f[i] = y;
+              }
+              filteredChannels.push(f);
+            }
+
+            // Gating calculation
+            const G = channels === 1 ? [1.0] : channels === 2 ? [1.0, 1.0] : new Array(channels).fill(1.0);
+            const Tg = 0.4, step = 0.25;
+            const numBlocks = Math.floor(Math.round((durationSeconds - Tg) / (Tg * step))) + 1;
+            let integratedLufs = -70.0;
+            let momentaryMaxLufs = -70.0;
+
+            if (numBlocks > 0) {
+              const blockSamples = Math.floor(Tg * sampleRate);
+              const z = [];
+              for (let c = 0; c < channels; c++) z.push(new Float64Array(numBlocks));
+              const blockLoudness = new Float64Array(numBlocks);
+
+              for (let j = 0; j < numBlocks; j++) {
+                const l = Math.floor(Tg * (j * step) * sampleRate);
+                const u = Math.min(l + blockSamples, numSamples);
+                let blockSum = 0.0;
+                for (let c = 0; c < channels; c++) {
+                  const chData = filteredChannels[c];
+                  let sSq = 0;
+                  for (let i = l; i < u; i++) sSq += chData[i] * chData[i];
+                  const mSq = sSq / (Tg * sampleRate);
+                  z[c][j] = mSq;
+                  blockSum += G[c] * mSq;
+                }
+                const bLufs = blockSum > 1e-12 ? -0.691 + 10.0 * Math.log10(blockSum) : -100.0;
+                blockLoudness[j] = bLufs;
+                if (bLufs > momentaryMaxLufs) momentaryMaxLufs = bLufs;
+              }
+
+              // Absolute Gate >= -70 LKFS
+              const J_g = [];
+              for (let j = 0; j < numBlocks; j++) {
+                if (blockLoudness[j] >= -70.0) J_g.push(j);
+              }
+
+              if (J_g.length > 0) {
+                let absEnergy = 0.0;
+                const zAvg = new Float64Array(channels);
+                for (let c = 0; c < channels; c++) {
+                  let sZ = 0;
+                  for (let k = 0; k < J_g.length; k++) sZ += z[c][J_g[k]];
+                  zAvg[c] = sZ / J_g.length;
+                  absEnergy += G[c] * zAvg[c];
+                }
+                const Gamma_r = -0.691 + 10.0 * Math.log10(Math.max(1e-12, absEnergy)) - 10.0;
+                const J_final = [];
+                for (let j = 0; j < numBlocks; j++) {
+                  if (blockLoudness[j] > Gamma_r && blockLoudness[j] >= -70.0) J_final.push(j);
+                }
+
+                let finalEnergy = 0.0;
+                if (J_final.length > 0) {
+                  for (let c = 0; c < channels; c++) {
+                    let sZ = 0;
+                    for (let k = 0; k < J_final.length; k++) sZ += z[c][J_final[k]];
+                    finalEnergy += G[c] * (sZ / J_final.length);
+                  }
+                } else {
+                  finalEnergy = absEnergy;
+                }
+                integratedLufs = finalEnergy > 1e-12 ? Math.round((-0.691 + 10.0 * Math.log10(finalEnergy)) * 100) / 100 : -70.0;
+              }
+            }
+
+            // === True Peak (4x Polyphase Interpolation) ===
+            self.postMessage({ type: 'PROGRESS', stage: 'ANALYZING_TRUE_PEAK', message: 'Calculating 4x oversampled polyphase True Peak (dBTP)...', progressPercent: 85 });
+            let maxTruePeak = globalPeakLinear;
+            const upFactor = sampleRate > 96000 ? 1 : sampleRate > 48000 ? 2 : 4;
+
+            if (upFactor > 1) {
+              // 4x polyphase sinc filter (halfTaps = 12)
+              const halfTaps = 12, numTaps = 24;
+              for (let c = 0; c < channels; c++) {
+                const d = channelBuffers[c];
+                for (let i = 0; i < numSamples; i++) {
+                  const a0 = Math.abs(d[i]);
+                  if (a0 > maxTruePeak) maxTruePeak = a0;
+                  if (a0 < maxTruePeak * 0.7 && i > 0 && i < numSamples - 1) {
+                    if (Math.abs(d[i-1]) < maxTruePeak * 0.7 && Math.abs(d[i+1]) < maxTruePeak * 0.7) continue;
+                  }
+                  // Sub-phase sinc interpolation at +0.25, +0.5, +0.75
+                  for (let p = 1; p < upFactor; p++) {
+                    const offset = p / upFactor;
+                    let interp = 0.0;
+                    for (let k = 0; k < numTaps; k++) {
+                      const idx = i - halfTaps + 1 + k;
+                      if (idx >= 0 && idx < numSamples) {
+                        const t = (k - halfTaps + 1) - offset;
+                        const sinc = Math.abs(t) > 1e-7 ? Math.sin(Math.PI * t) / (Math.PI * t) : 1.0;
+                        const kArg = 2.0 * (k - halfTaps + 0.5) / numTaps;
+                        const w = Math.abs(kArg) <= 1.0 ? 0.54 - 0.46 * Math.cos(Math.PI * (kArg + 1)) : 0;
+                        interp += d[idx] * (sinc * w);
+                      }
+                    }
+                    const absInterp = Math.abs(interp);
+                    if (absInterp > maxTruePeak) maxTruePeak = absInterp;
+                  }
+                }
+              }
+            }
+
+            const truePeakLinear = Math.round(maxTruePeak * 100000) / 100000;
+            const truePeakDbtp = maxTruePeak > 1e-6 ? Math.round(20.0 * Math.log10(maxTruePeak) * 100) / 100 : -100.0;
+
             // SHA-256
             let sha256 = 'sha256-computed';
             if (self.crypto && self.crypto.subtle) {
@@ -236,8 +394,15 @@ function analyzeWithWorker(
                 fileSizeBytes: buffer.byteLength,
                 sha256Hash: sha256
               },
+              integratedLufs: Math.max(-70.0, integratedLufs),
+              momentaryMaxLufs: Math.max(-70.0, Math.round(momentaryMaxLufs * 100) / 100),
+              shortTermMaxLufs: null,
+              loudnessRangeLu: null,
               samplePeakLinear: Math.round(globalPeakLinear * 100000) / 100000,
               samplePeakDbfs: globalPeakLinear > 1e-6 ? Math.round(20 * Math.log10(globalPeakLinear) * 100) / 100 : -100.0,
+              truePeakLinear,
+              truePeakDbtp,
+              isClippingRisk: truePeakDbtp >= -0.1 || globalPeakLinear >= 0.9999,
               rmsLinear: Math.round(globalRms * 100000) / 100000,
               rmsDbfs: globalRms > 1e-6 ? Math.round(20 * Math.log10(globalRms) * 100) / 100 : -100.0,
               dcOffsetLinear: Math.round(globalDc * 100000) / 100000,

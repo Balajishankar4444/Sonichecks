@@ -1,5 +1,7 @@
 import { parseWavAudioData } from './wav-parser';
 import { calculateDspMetrics } from './dsp-metrics';
+import { calculateLoudness } from './lufs';
+import { calculateTruePeak } from './true-peak';
 import { LocalAudioMeasurements } from './types';
 
 export async function calculateBufferSha256(buffer: ArrayBuffer): Promise<string> {
@@ -18,15 +20,21 @@ export async function analyzeWavBuffer(
 ): Promise<LocalAudioMeasurements> {
   const startTime = performance.now();
 
-  if (onProgress) onProgress('PARSING_WAV', 20);
+  if (onProgress) onProgress('PARSING_WAV', 15);
   const parsed = parseWavAudioData(buffer);
 
-  if (onProgress) onProgress('HASHING_FILE', 45);
+  if (onProgress) onProgress('HASHING_FILE', 30);
   const sha256Hash = await calculateBufferSha256(buffer);
   parsed.metadata.sha256Hash = sha256Hash;
 
-  if (onProgress) onProgress('ANALYZING_METRICS', 70);
+  if (onProgress) onProgress('ANALYZING_METRICS', 50);
   const metrics = calculateDspMetrics(parsed.channels, parsed.metadata.sampleRate);
+
+  if (onProgress) onProgress('ANALYZING_LUFS', 70);
+  const loudness = calculateLoudness(parsed.channels, parsed.metadata.sampleRate);
+
+  if (onProgress) onProgress('ANALYZING_TRUE_PEAK', 85);
+  const truePeak = calculateTruePeak(parsed.channels, parsed.metadata.sampleRate);
 
   if (onProgress) onProgress('COMPLETE', 100);
   const totalDurationMs = Math.round(performance.now() - startTime);
@@ -36,8 +44,18 @@ export async function analyzeWavBuffer(
     fileSizeBytes: buffer.byteLength,
     sha256Hash,
     metadata: parsed.metadata,
+    // Loudness
+    integratedLufs: loudness.integratedLufs,
+    momentaryMaxLufs: loudness.momentaryMaxLufs,
+    shortTermMaxLufs: loudness.shortTermMaxLufs,
+    loudnessRangeLu: loudness.loudnessRangeLu,
+    // Peaks & True Peak
     samplePeakLinear: metrics.samplePeakLinear,
     samplePeakDbfs: metrics.samplePeakDbfs,
+    truePeakLinear: truePeak.truePeakLinear,
+    truePeakDbtp: truePeak.truePeakDbtp,
+    isClippingRisk: truePeak.isClippingRisk || metrics.samplePeakDbfs >= -0.05,
+    // RMS & DC
     rmsLinear: metrics.rmsLinear,
     rmsDbfs: metrics.rmsDbfs,
     dcOffsetLinear: metrics.dcOffsetLinear,
