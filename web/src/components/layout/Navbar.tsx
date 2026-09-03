@@ -12,6 +12,7 @@ export default function Navbar() {
     { name: 'Dashboard', href: '/dashboard' },
     { name: 'Guides & Rules', href: '/audio-delivery-checker' },
     { name: 'Pricing', href: '/pricing' },
+    { name: 'Contact', href: '/contact' },
   ];
 
   return (
