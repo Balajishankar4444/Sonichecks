@@ -29,10 +29,10 @@ import UpgradePromptModal, { UpgradePromptState } from '@/components/common/Upgr
 import TierBadgeSelector from '@/components/common/TierBadgeSelector';
 import { BatchQCResult, FileQCResult, QCProfile, QCStatus } from '@/types/qc';
 import { getQCProfiles, DEFAULT_QC_PROFILES, analyzeBatchFiles, analyzeSingleFile } from '@/lib/api';
-import { saveBatchToHistory, getUsageState, UsageState } from '@/lib/storage';
+import { saveBatchToHistory, getUsageState, updatePlan, UsageState } from '@/lib/storage';
 import { ProductTier, TIER_CONFIGS, getTierConfig } from '@/config/tiers';
 import { useAuth } from '@/context/AuthContext';
-import { analyzeWavFileLocally } from '@/lib/audio-engine/client';
+import { analyzeAudioFileLocally } from '@/lib/audio-engine/client';
 import { convertLocalMeasurementsToFileQCResult } from '@/lib/audio-engine/adapter';
 
 export default function CheckPage() {
@@ -74,14 +74,49 @@ export default function CheckPage() {
 
   useEffect(() => {
     setUsage(getUsageState(user?.email || undefined));
+    // Check URL parameters for Creem payment return
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paymentStatus = urlParams.get('payment');
+      const planParam = urlParams.get('plan')?.toLowerCase();
+
+      if (paymentStatus === 'success' && (planParam === 'pro' || planParam === 'studio')) {
+        updatePlan(planParam as 'pro' | 'studio', user?.email || undefined);
+        setUsage(getUsageState(user?.email || undefined));
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }
+
+    const handlePlanUpdate = () => {
+      setUsage(getUsageState(user?.email || undefined));
+    };
+    window.addEventListener('sonichecks_plan_updated', handlePlanUpdate);
+    window.addEventListener('storage', handlePlanUpdate);
+
     async function loadProfiles() {
       const data = await getQCProfiles();
       setProfiles(data);
+      if (typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const profileParam = urlParams.get('profile')?.toLowerCase();
+        if (profileParam) {
+          const matched = data.find(p => p.profile_id.toLowerCase() === profileParam);
+          if (matched) {
+            setSelectedProfile(matched);
+            return;
+          }
+        }
+      }
       if (data.length > 0) {
         setSelectedProfile(data[0]);
       }
     }
     loadProfiles();
+
+    return () => {
+      window.removeEventListener('sonichecks_plan_updated', handlePlanUpdate);
+      window.removeEventListener('storage', handlePlanUpdate);
+    };
   }, [user]);
 
   const triggerGate = (featureName: string, description: string, requiredTier: ProductTier = 'PRO') => {
@@ -219,31 +254,19 @@ export default function CheckPage() {
           );
 
           let fileQcResult: FileQCResult;
-          const isWav = file.name.toLowerCase().endsWith('.wav');
-
-          if (isWav) {
-            // Local in-browser DSP analysis (Zero audio upload)
-            const measurements = await analyzeWavFileLocally(file);
+          try {
+            // Pure in-browser universal DSP analysis (WAV, MP3, FLAC, AAC, M4A, OGG, AIFF) - 0 upload
+            const measurements = await analyzeAudioFileLocally(file);
             fileQcResult = convertLocalMeasurementsToFileQCResult(measurements, selectedProfile);
-          } else {
-            // Non-WAV formats routed to Python Reference Engine
-            try {
-              fileQcResult = await analyzeSingleFile(
-                file,
-                selectedProfile.profile_id,
-                abortControllerRef.current.signal,
-                userTier
-              );
-            } catch (nonWavErr: any) {
-              fileQcResult = {
-                file_id: `err_${Date.now()}_${i}`,
-                filename: file.name,
-                overall_status: 'ERROR',
-                checks: [],
-                fix_summary: [],
-                error_message: `Browser analysis processes uncompressed WAV files locally on your device. Non-WAV format (${file.name.split('.').pop()?.toUpperCase()}) requires Python Reference server. (${nonWavErr.message || 'Server unreachable'})`
-              };
-            }
+          } catch (audioErr: any) {
+            fileQcResult = {
+              file_id: `err_${Date.now()}_${i}`,
+              filename: file.name,
+              overall_status: 'ERROR',
+              checks: [],
+              fix_summary: ['Ensure the file is not corrupted and is a standard audio container (WAV, MP3, FLAC, AAC, M4A, OGG, AIFF)'],
+              error_message: audioErr.message || 'Failed to decode audio in browser'
+            };
           }
 
           localFileResults.push(fileQcResult);
@@ -383,7 +406,7 @@ export default function CheckPage() {
                 prev.map((s, idx) => (idx === i ? { ...s, status: 'ANALYZING' } : s))
               );
 
-              const measurements = await analyzeWavFileLocally(file);
+              const measurements = await analyzeAudioFileLocally(file);
               const fileQcResult = convertLocalMeasurementsToFileQCResult(measurements, selectedProfile);
               localFileResults.push(fileQcResult);
 
@@ -457,7 +480,7 @@ export default function CheckPage() {
     try {
       let updatedResult: FileQCResult;
       if (engineMode === 'LOCAL') {
-        const measurements = await analyzeWavFileLocally(fileObj);
+        const measurements = await analyzeAudioFileLocally(fileObj);
         updatedResult = convertLocalMeasurementsToFileQCResult(measurements, selectedProfile);
       } else {
         updatedResult = await analyzeSingleFile(fileObj, selectedProfile.profile_id, undefined, userTier);

@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { RotateCcw, ShieldCheck, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
+import { RotateCcw, ShieldCheck, ArrowLeft, CheckCircle2, AlertCircle, XCircle } from 'lucide-react';
 
 export const metadata = {
   title: 'Refund & Cancellation Policy — Sonichecks',
@@ -22,71 +22,67 @@ export default function RefundsPage() {
           </Link>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold">
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Billing &amp; Refunds</span>
+            <span>Billing &amp; Cancellation Policy</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
             Refund &amp; Cancellation Policy
           </h1>
           <p className="text-xs text-slate-400">
-            Transparent and fair subscription policies for all Sonichecks users.
+            Subscription terms and non-refundable policy for Sonichecks digital services.
           </p>
         </div>
 
         {/* Content Body */}
         <div className="p-8 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-8 text-xs text-slate-300 leading-relaxed">
-          {/* 1. Subscription Cancellation */}
+          {/* 1. No Refund Policy */}
           <section className="space-y-2">
-            <h2 className="text-base font-bold text-white">1. Subscription Cancellation</h2>
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <XCircle className="w-4 h-4 text-rose-400" />
+              <span>1. No Refund Policy (All Sales Final)</span>
+            </h2>
             <p>
-              You may cancel your Sonichecks subscription (Pro or Studio) at any time directly through your account dashboard or billing portal.
+              Because Sonichecks provides immediate digital access, cryptographic report generation, and automated cloud quota allowances upon payment, <strong>all purchases and subscription fees are strictly non-refundable</strong>.
             </p>
             <p>
-              There are no cancellation fees or long-term contracts. Upon cancelling, your subscription will not renew at the next billing date.
-            </p>
-          </section>
-
-          {/* 2. When Access Ends */}
-          <section className="space-y-2">
-            <h2 className="text-base font-bold text-white">2. Access Period Post-Cancellation</h2>
-            <p>
-              When you cancel a paid plan, you will retain full access to your plan features (including batch limits, PDF reports, and remaining monthly file allowances) until the end of your current prepaid billing cycle.
-            </p>
-            <p>
-              Once the cycle concludes, your account will automatically downgrade to the Free plan (5 files/month) without deleting your past QC history.
+              We encourage users to test the platform using our <strong>Free plan (5 checks/month)</strong> to evaluate the accuracy of the audio engine and inspection reports prior to upgrading to a paid tier.
             </p>
           </section>
 
-          {/* 3. Refund Policy */}
+          {/* 2. Subscription Cancellation */}
           <section className="space-y-2">
-            <h2 className="text-base font-bold text-white">3. Refund Conditions</h2>
-            <p>We want you to be completely satisfied with Sonichecks:</p>
-            <ul className="list-disc pl-5 space-y-1 text-slate-300">
-              <li><strong>14-Day Guarantee:</strong> If you upgraded to a paid plan and are unsatisfied with the quality control engine or encountered unresolvable technical issues, contact support within 14 days of your initial purchase for a full refund.</li>
-              <li><strong>Fair Usage:</strong> Refunds are intended for genuine dissatisfaction and technical concerns; accounts that have consumed substantial monthly batch volume before requesting a refund may be evaluated on a case-by-case basis.</li>
-            </ul>
-          </section>
-
-          {/* 4. Failed Payments & Grace Period */}
-          <section className="space-y-2">
-            <h2 className="text-base font-bold text-white">4. Failed Payments &amp; Grace Period</h2>
+            <h2 className="text-base font-bold text-white">2. Subscription Cancellation</h2>
             <p>
-              If a recurring subscription payment fails (e.g. due to an expired credit card), we provide a 7-day grace period with automatic retry attempts before downgrading your account. You will receive an automated email notice to update your payment method.
+              You may cancel your Sonichecks subscription (Pro or Studio) at any time directly through your account dashboard.
+            </p>
+            <p>
+              There are no cancellation fees or long-term commitments. Once cancelled, your subscription will not renew for any subsequent billing cycles.
             </p>
           </section>
 
-          {/* 5. Free Plan Rules */}
+          {/* 3. Access Period Post-Cancellation */}
           <section className="space-y-2">
-            <h2 className="text-base font-bold text-white">5. Free Plan Usage</h2>
+            <h2 className="text-base font-bold text-white">3. Access Period Post-Cancellation</h2>
             <p>
-              The Sonichecks Free plan is 100% free with no credit card required. Free checks reset automatically at the beginning of each calendar month. Unused file credits do not roll over between months.
+              When you cancel your subscription, you will retain full access to your paid tier features (including batch size limits, matrix view, and monthly file allowance) until the end of your current prepaid billing period.
+            </p>
+            <p>
+              Once your current period concludes, your account will revert to the Free tier without deleting your past QC history.
             </p>
           </section>
 
-          {/* 6. Contact */}
+          {/* 4. Free Tier & Fair Usage */}
           <section className="space-y-2">
-            <h2 className="text-base font-bold text-white">6. Requesting a Refund</h2>
+            <h2 className="text-base font-bold text-white">4. Free Tier Usage</h2>
             <p>
-              To request a refund or ask a billing question, please email <span className="font-mono text-cyan-400">billing@sonichecks.com</span> with your account email address. We respond within 1 business day.
+              The Sonichecks Free tier is permanently available with no credit card required. Free checks reset automatically at the beginning of each calendar month. Unused file allowances do not roll over.
+            </p>
+          </section>
+
+          {/* 5. Support & Inquiries */}
+          <section className="space-y-2">
+            <h2 className="text-base font-bold text-white">5. Support &amp; Billing Inquiries</h2>
+            <p>
+              If you have questions regarding your invoices, subscriptions, or encounter technical errors, please reach out through our <Link href="/contact" className="text-cyan-400 hover:underline">Contact Form</Link> or email us at <span className="font-mono text-cyan-400">support@sonichecks.com</span>.
             </p>
           </section>
         </div>

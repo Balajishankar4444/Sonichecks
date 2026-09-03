@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, Auth } from 'firebase/auth';
+import { getFirestore, Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '',
@@ -12,6 +13,7 @@ const firebaseConfig = {
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
+let db: Firestore | null = null;
 const googleProvider = new GoogleAuthProvider();
 
 export function isFirebaseConfigured(): boolean {
@@ -22,10 +24,10 @@ try {
   if (firebaseConfig.apiKey && firebaseConfig.apiKey.length > 5) {
     app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
     auth = getAuth(app);
+    db = getFirestore(app);
   }
 } catch (err) {
-  // Gracefully handle build-time or invalid key environments without breaking prerender
-  console.warn('Firebase initialization skipped or running in mock environment:', err);
+  console.warn('Firebase initialization notice:', err);
 }
 
-export { app, auth, googleProvider };
+export { app, auth, db, googleProvider };

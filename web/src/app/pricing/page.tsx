@@ -4,8 +4,10 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, ShieldCheck, Zap, Loader2, CreditCard, AlertCircle, Sparkles, ArrowRight } from 'lucide-react';
 import { updatePlan } from '@/lib/storage';
+import { useAuth } from '@/context/AuthContext';
 
 export default function PricingPage() {
+  const { user } = useAuth();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -17,13 +19,13 @@ export default function PricingPage() {
       const res = await fetch('/api/checkout/creem', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan })
+        body: JSON.stringify({ plan, customerEmail: user?.email })
       });
 
       const data = await res.json();
       if (!res.ok || data.error) {
         // Fallback: If Creem sandbox is not configured, activate plan locally
-        updatePlan(plan);
+        updatePlan(plan, user?.email || undefined);
         window.location.href = `/dashboard?payment=success&plan=${plan}`;
         return;
       }
@@ -31,12 +33,12 @@ export default function PricingPage() {
       if (data.checkoutUrl) {
         window.location.href = data.checkoutUrl;
       } else {
-        updatePlan(plan);
+        updatePlan(plan, user?.email || undefined);
         window.location.href = `/dashboard?payment=success&plan=${plan}`;
       }
     } catch (err: any) {
       console.warn('Checkout fallback:', err);
-      updatePlan(plan);
+      updatePlan(plan, user?.email || undefined);
       window.location.href = `/dashboard?payment=success&plan=${plan}`;
     }
   };
@@ -69,21 +71,21 @@ export default function PricingPage() {
         {/* Pricing Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
           {/* Free */}
-          <div className="p-6 sm:p-8 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6 flex flex-col justify-between">
+          <div className="p-6 sm:p-8 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-slate-700 hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 space-y-6 flex flex-col justify-between group">
             <div className="space-y-4">
               <div>
-                <h3 className="text-xl font-bold text-white">Free</h3>
+                <h3 className="text-xl font-bold text-white group-hover:text-cyan-400 transition-colors">Free</h3>
                 <p className="text-xs text-slate-400 mt-1">For trying Sonichecks.</p>
               </div>
               <div className="text-4xl font-black text-white">
                 €0<span className="text-sm font-normal text-slate-400">/month</span>
               </div>
               <ul className="space-y-2.5 text-xs text-slate-300 pt-2 border-t border-slate-800">
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> 5 files / month</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Single-file QC processing</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Real deterministic audio analysis</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> LUFS, True Peak, Clipping &amp; Silence</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Detailed fixes &amp; recommendations</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> 5 files / month</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Single-file QC processing</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Real deterministic audio analysis</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> LUFS, True Peak, Clipping &amp; Silence</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Detailed fixes &amp; recommendations</li>
                 <li className="flex items-center gap-2 text-slate-500 line-through">Batch processing &amp; QC Matrix</li>
                 <li className="flex items-center gap-2 text-slate-500 line-through">PDF Reports &amp; CSV export</li>
                 <li className="flex items-center gap-2 text-slate-500 line-through">Saved history &amp; custom profiles</li>
@@ -91,94 +93,108 @@ export default function PricingPage() {
             </div>
             <Link
               href="/check"
-              className="w-full py-3.5 rounded-xl font-bold text-xs text-center text-slate-200 bg-slate-800 hover:bg-slate-700 transition-colors block"
+              className="w-full py-3.5 rounded-xl font-bold text-xs text-center text-slate-200 bg-slate-800 hover:bg-slate-700 hover:text-white hover:scale-[1.02] active:scale-95 transition-all duration-200 block shadow-md"
             >
               Start Free
             </Link>
           </div>
 
           {/* Pro (Recommended) */}
-          <div className="p-6 sm:p-8 rounded-2xl bg-slate-900 border-2 border-cyan-500 shadow-2xl shadow-cyan-950/70 space-y-6 flex flex-col justify-between relative">
-            <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-cyan-400 text-slate-950 shadow-md">
+          <div className="p-6 sm:p-8 rounded-2xl bg-slate-900 border-2 border-cyan-500 shadow-2xl shadow-cyan-950/80 hover:shadow-cyan-500/20 hover:-translate-y-2 transition-all duration-300 space-y-6 flex flex-col justify-between relative group">
+            <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-cyan-400 text-slate-950 shadow-lg shadow-cyan-400/30">
               Recommended
             </span>
             <div className="space-y-4">
               <div>
-                <h3 className="text-xl font-bold text-white">Pro</h3>
+                <h3 className="text-xl font-bold text-white group-hover:text-cyan-300 transition-colors">Pro</h3>
                 <p className="text-xs text-cyan-400 mt-1">For independent audio professionals.</p>
               </div>
               <div className="text-4xl font-black text-white">
                 €4.99<span className="text-sm font-normal text-slate-400">/month</span>
               </div>
               <ul className="space-y-2.5 text-xs text-slate-300 pt-2 border-t border-slate-800">
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> 100 files / month</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Batch QC (up to 50 files per batch)</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Batch QC Comparison Matrix</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Professional PDF QC Certificate</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> SHA-256 file hashes in reports</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> CSV Batch Export</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Standard &amp; Custom QC Profiles</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> QC Inspection History &amp; settings</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> 100 files / month</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Batch QC (up to 50 files per batch)</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Batch QC Comparison Matrix</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Professional PDF QC Certificate</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> SHA-256 file hashes in reports</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> CSV Batch Export</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Standard &amp; Custom QC Profiles</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> QC Inspection History &amp; settings</li>
               </ul>
             </div>
-            <button
-              type="button"
-              onClick={() => handleCheckout('pro')}
-              disabled={loadingPlan === 'pro'}
-              className="w-full py-3.5 rounded-xl font-bold text-xs text-center text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-lg shadow-cyan-500/25 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              {loadingPlan === 'pro' ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Connecting to Checkout...</span>
-                </>
-              ) : (
-                <>
-                  <CreditCard className="w-4 h-4" />
-                  <span>Choose Pro</span>
-                </>
-              )}
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => handleCheckout('pro')}
+                disabled={loadingPlan === 'pro'}
+                className="w-full py-3.5 rounded-xl font-bold text-xs text-center text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 shadow-xl shadow-cyan-500/30 flex items-center justify-center gap-2 filter blur-[2px] opacity-60 pointer-events-none select-none transition-all duration-200"
+              >
+                {loadingPlan === 'pro' ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Connecting to Checkout...</span>
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="w-4 h-4" />
+                    <span>Choose Pro</span>
+                  </>
+                )}
+              </button>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span className="px-3 py-1 rounded-full bg-slate-950/90 border border-cyan-400/60 text-cyan-300 font-bold text-[11px] tracking-wider uppercase shadow-xl backdrop-blur-md">
+                  Soon
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* Studio */}
-          <div className="p-6 sm:p-8 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6 flex flex-col justify-between">
+          <div className="p-6 sm:p-8 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/50 hover:shadow-xl hover:shadow-cyan-950/30 hover:-translate-y-1.5 transition-all duration-300 space-y-6 flex flex-col justify-between group">
             <div className="space-y-4">
               <div>
-                <h3 className="text-xl font-bold text-white">Studio</h3>
+                <h3 className="text-xl font-bold text-white group-hover:text-cyan-400 transition-colors">Studio</h3>
                 <p className="text-xs text-slate-400 mt-1">For studios and higher-volume workflows.</p>
               </div>
               <div className="text-4xl font-black text-white">
                 €14.99<span className="text-sm font-normal text-slate-400">/month</span>
               </div>
               <ul className="space-y-2.5 text-xs text-slate-300 pt-2 border-t border-slate-800">
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> 500 files / month</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> 200-file bulk batches</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Multi-track Project organization</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Client/Project organization</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Project-level reports &amp; history</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Priority processing queue</li>
-                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400" /> Everything in Pro included</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> 500 files / month</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> 200-file bulk batches</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Multi-track Project organization</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Client/Project organization</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Project-level reports &amp; history</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Priority processing queue</li>
+                <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Everything in Pro included</li>
               </ul>
             </div>
-            <button
-              type="button"
-              onClick={() => handleCheckout('studio')}
-              disabled={loadingPlan === 'studio'}
-              className="w-full py-3.5 rounded-xl font-bold text-xs text-center text-slate-200 bg-slate-800 hover:bg-slate-700 transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              {loadingPlan === 'studio' ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
-                  <span>Connecting to Checkout...</span>
-                </>
-              ) : (
-                <>
-                  <CreditCard className="w-4 h-4 text-cyan-400" />
-                  <span>Choose Studio</span>
-                </>
-              )}
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => handleCheckout('studio')}
+                disabled={loadingPlan === 'studio'}
+                className="w-full py-3.5 rounded-xl font-bold text-xs text-center text-slate-200 bg-slate-800 flex items-center justify-center gap-2 filter blur-[2px] opacity-60 pointer-events-none select-none transition-all duration-200 shadow-md"
+              >
+                {loadingPlan === 'studio' ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                    <span>Connecting to Checkout...</span>
+                  </>
+                ) : (
+                  <>
+                    <CreditCard className="w-4 h-4 text-cyan-400" />
+                    <span>Choose Studio</span>
+                  </>
+                )}
+              </button>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span className="px-3 py-1 rounded-full bg-slate-950/90 border border-slate-700 text-slate-300 font-bold text-[11px] tracking-wider uppercase shadow-xl backdrop-blur-md">
+                  Soon
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 

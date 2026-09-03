@@ -15,11 +15,15 @@ import {
   Layers, 
   CheckCircle2, 
   AlertTriangle, 
-  XCircle,
-  Lock,
-  ArrowRight,
-  Folder,
-  LogIn
+  XCircle, 
+  Lock, 
+  ArrowRight, 
+  Folder, 
+  LogIn, 
+  PartyPopper, 
+  RefreshCw, 
+  Zap,
+  Info
 } from 'lucide-react';
 import { getSavedHistory, getUsageState, updatePlan, UsageState } from '@/lib/storage';
 import { BatchQCResult, QCStatus } from '@/types/qc';
@@ -33,6 +37,9 @@ export default function DashboardPage() {
   const { user, openAuthModal, loading: authLoading } = useAuth();
   const [history, setHistory] = useState<BatchQCResult[]>([]);
   const [usage, setUsage] = useState<UsageState | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
   const [projects, setProjects] = useState<{ id: string; name: string; client: string; fileCount: number; date: string }[]>([
     { id: 'proj-1', name: 'Summer EP Master 2026', client: 'Midnight Records', fileCount: 4, date: '2026-09-02' },
     { id: 'proj-2', name: 'Podcast Season 3 Delivery', client: 'AudioSphere Media', fileCount: 12, date: '2026-08-28' },
@@ -43,10 +50,79 @@ export default function DashboardPage() {
 
   const [upgradePrompt, setUpgradePrompt] = useState<UpgradePromptState | null>(null);
 
+  const refreshState = (overrideEmail?: string) => {
+    const targetEmail = overrideEmail !== undefined ? overrideEmail : (user?.email || undefined);
+    setHistory(getSavedHistory(targetEmail));
+    setUsage(getUsageState(targetEmail));
+  };
+
+  const syncSubscriptionWithServer = async (emailToSync?: string, showNotification: boolean = false) => {
+    const targetEmail = emailToSync || user?.email;
+    if (!targetEmail) return;
+
+    setIsSyncing(true);
+    try {
+      const res = await fetch(`/api/subscription/sync?email=${encodeURIComponent(targetEmail)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.plan && (data.plan === 'pro' || data.plan === 'studio')) {
+          updatePlan(data.plan, targetEmail);
+          refreshState(targetEmail);
+          if (showNotification) {
+            setSyncMessage(`🎉 Verified: ${data.plan.toUpperCase()} plan is active for ${targetEmail}!`);
+          }
+        } else if (showNotification) {
+          setSyncMessage(`Plan is up to date (${data.plan?.toUpperCase() || 'FREE'}).`);
+        }
+      }
+    } catch (err) {
+      console.warn('Subscription sync warning:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   useEffect(() => {
-    setHistory(getSavedHistory(user?.email || undefined));
-    setUsage(getUsageState(user?.email || undefined));
-  }, [user]);
+    // 1. Initial load for the authenticated user
+    refreshState(user?.email || undefined);
+
+    // 2. Check URL parameters for Creem payment return (only on first-time return from checkout)
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const paymentStatus = urlParams.get('payment');
+      const planParam = urlParams.get('plan')?.toLowerCase();
+
+      if (paymentStatus === 'success' && (planParam === 'pro' || planParam === 'studio')) {
+        updatePlan(planParam as 'pro' | 'studio', user?.email || undefined);
+        setSyncMessage(`🎉 Payment Verified! Your ${planParam.toUpperCase()} subscription is now active.`);
+        refreshState(user?.email || undefined);
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }
+
+    // 3. Silent background auto-sync from server (no banner shown)
+    if (user?.email) {
+      syncSubscriptionWithServer(user.email, false);
+    }
+
+    // 4. Listen for global plan updates
+    const handlePlanUpdate = () => refreshState(user?.email || undefined);
+    window.addEventListener('sonichecks_plan_updated', handlePlanUpdate);
+    window.addEventListener('storage', handlePlanUpdate);
+
+    return () => {
+      window.removeEventListener('sonichecks_plan_updated', handlePlanUpdate);
+      window.removeEventListener('storage', handlePlanUpdate);
+    };
+  }, [user?.email]);
+
+  const handleManualSync = () => {
+    if (user?.email) {
+      syncSubscriptionWithServer(user.email, true);
+    } else {
+      refreshState();
+    }
+  };
 
   const userTier: ProductTier = (usage?.plan?.toUpperCase() as ProductTier) || 'FREE';
   const tierConfig = getTierConfig(userTier);
@@ -110,282 +186,289 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto space-y-8">
-        {/* Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-900">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              Quality Control Dashboard
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-              Account: <span className="text-cyan-300 font-semibold">{user?.email || 'Guest'}</span> &bull; Track file allowances and past runs.
+        {/* Sync / Success Notification Banner */}
+        {syncMessage && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/80 to-teal-950/80 border-2 border-emerald-500/50 flex items-center justify-between gap-4 shadow-xl shadow-emerald-950/50 animate-fadeIn">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center flex-shrink-0">
+                <PartyPopper className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white">
+                  {syncMessage}
+                </h4>
+                <p className="text-xs text-emerald-300/90 mt-0.5">
+                  100 files/month quota, Batch QC matrix, and PDF inspection certificates are now unlocked.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSyncMessage(null)}
+              className="text-emerald-400 hover:text-white text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-500/20 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Dashboard Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-6">
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                Quality Control Dashboard
+              </h1>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase ${
+                userTier === 'STUDIO' ? 'bg-purple-500/10 text-purple-400 border-purple-500/30' :
+                userTier === 'PRO' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30' :
+                'bg-slate-800 text-slate-400 border-slate-700'
+              }`}>
+                {userTier}
+              </span>
+            </div>
+            <p className="text-xs sm:text-sm text-slate-400">
+              Account: <span className="text-white font-medium">{user?.email || 'Guest User'}</span> &bull; Track file allowances and past runs.
             </p>
           </div>
 
           <div className="flex items-center gap-3">
-            <TierBadgeSelector />
+            <button
+              type="button"
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Sync subscription status from Creem payment gateway"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-cyan-400' : 'text-slate-400'}`} />
+              <span>{isSyncing ? 'Syncing...' : 'Sync Plan'}</span>
+            </button>
+
+            {userTier === 'FREE' && (
+              <Link
+                href="/pricing"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-lg shadow-cyan-500/20 active:scale-95 transition-all"
+              >
+                <Zap className="w-3.5 h-3.5 fill-current" />
+                <span>Upgrade to Pro (€4.99)</span>
+              </Link>
+            )}
+
             <Link
               href="/check"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-md shadow-cyan-500/20 active:scale-95 transition-all"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors cursor-pointer"
             >
-              <ShieldCheck className="w-4 h-4" />
+              <Plus className="w-4 h-4" />
               <span>New QC Inspection</span>
             </Link>
           </div>
         </div>
 
-        {/* Tier & Usage Overview Cards */}
+        {/* Overview Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {/* Monthly Allowance */}
+          {/* Monthly Checks Quota Card */}
           <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Monthly File Usage</span>
-              <span className="text-xs font-mono text-cyan-400 font-bold">
-                {usage?.filesChecked || 0} / {tierConfig.monthlyFileLimit} checks
-              </span>
+              <span className="text-xs font-medium text-slate-400">Monthly Allowance</span>
+              <BarChart3 className="w-4 h-4 text-cyan-400" />
             </div>
-            <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-cyan-400 to-blue-500 rounded-full transition-all"
-                style={{ width: `${usagePercent}%` }}
-              />
+            <div>
+              <div className="text-3xl font-black text-white font-mono">
+                {usage?.filesChecked ?? 0} <span className="text-sm font-normal text-slate-400">/ {tierConfig.monthlyFileLimit} files</span>
+              </div>
+              <div className="w-full bg-slate-800 h-2 rounded-full mt-3 overflow-hidden">
+                <div 
+                  className={`h-full transition-all duration-500 ${
+                    usagePercent >= 100 ? 'bg-rose-500' : usagePercent > 80 ? 'bg-amber-400' : 'bg-cyan-400'
+                  }`}
+                  style={{ width: `${usagePercent}%` }}
+                />
+              </div>
             </div>
-            <div className="flex justify-between items-center text-[11px] text-slate-400 pt-1">
-              <span>Resets on 1st of each month</span>
-              {userTier === 'FREE' && (
-                <Link href="/pricing" className="text-cyan-400 hover:underline font-medium">
-                  Upgrade (100 checks)
-                </Link>
-              )}
-            </div>
+            <p className="text-[11px] text-slate-400">
+              {Math.max(0, tierConfig.monthlyFileLimit - (usage?.filesChecked ?? 0))} checks remaining in {usage?.month || 'current cycle'}.
+            </p>
           </div>
 
-          {/* Current Tier Details */}
-          <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
+          {/* Active Subscription Tier Card */}
+          <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Plan</span>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
-                userTier === 'STUDIO' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' :
-                userTier === 'PRO' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' :
-                'bg-slate-800 text-slate-300 border border-slate-700'
-              }`}>
-                {tierConfig.name} &bull; €{tierConfig.priceEur}/mo
-              </span>
+              <span className="text-xs font-medium text-slate-400">Active Subscription</span>
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
             </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              {tierConfig.description}
-            </p>
-            <div className="pt-1">
-              <Link href="/pricing" className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold inline-flex items-center gap-1">
-                <span>View all features &amp; tiers</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-2xl font-bold text-white capitalize">{tierConfig.name}</span>
+                <span className="text-sm font-semibold text-slate-400">€{tierConfig.priceEur}</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                Batch size: up to {tierConfig.maxBatchSize} files &bull; {userTier === 'FREE' ? 'Single checks' : 'Full Batch Matrix'}
+              </p>
+            </div>
+            {userTier === 'FREE' ? (
+              <Link 
+                href="/pricing" 
+                className="text-xs text-cyan-400 hover:text-cyan-300 font-semibold inline-flex items-center gap-1"
+              >
+                <span>Upgrade to Pro (€4.99)</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </Link>
-            </div>
-          </div>
-
-          {/* Batch Capacity */}
-          <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Batch Capacity</span>
-            <div className="text-2xl font-bold text-white">
-              {tierConfig.maxBatchSize === 1 ? 'Single File Only' : `Up to ${tierConfig.maxBatchSize} files / batch`}
-            </div>
-            <p className="text-xs text-slate-400">
-              {userTier === 'STUDIO' ? 'High-capacity 200-track studio batches with priority processing.' :
-               userTier === 'PRO' ? '50-file bulk albums with full consistency analysis.' :
-               'Free tier is limited to 1 file at a time. Upgrade to Pro for 50-file batches.'}
-            </p>
-          </div>
-        </div>
-
-        {/* Studio Projects Section */}
-        <div className="space-y-4 pt-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <FolderKanban className="w-5 h-5 text-cyan-400" />
-              <h2 className="text-lg font-bold text-white tracking-tight">Studio Projects &amp; Client Runs</h2>
-            </div>
-
-            {userTier === 'STUDIO' ? (
-              <button
-                type="button"
-                onClick={() => setShowNewProjectModal(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>New Project</span>
-              </button>
             ) : (
-              <button
-                type="button"
-                onClick={() => triggerGate('Studio Projects & Organization', 'Organize your QC runs by client, album, or series with unified project reports on the Studio plan.', 'STUDIO')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors"
-              >
-                <Lock className="w-3.5 h-3.5 text-amber-400" />
-                <span>Unlock Projects (Studio)</span>
-              </button>
+              <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Subscription Active</span>
+              </span>
             )}
           </div>
 
-          {userTier === 'STUDIO' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {projects.map((p) => (
-                <div key={p.id} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 transition-colors space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-purple-400 font-semibold">{p.client}</span>
-                    <span className="text-[10px] text-slate-500">{p.date}</span>
-                  </div>
-                  <h4 className="font-bold text-white text-sm truncate">{p.name}</h4>
-                  <p className="text-xs text-slate-400">{p.fileCount} tracks inspected</p>
-                </div>
-              ))}
+          {/* QC Inspection Summary */}
+          <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-400">Saved History</span>
+              <Clock className="w-4 h-4 text-cyan-400" />
             </div>
-          ) : (
-            <div className="p-6 rounded-2xl bg-slate-900/40 border border-slate-800/80 text-center space-y-2">
-              <p className="text-xs text-slate-400">
-                Organize client deliverables and album releases into unified Projects with Studio plan (€14.99/mo).
+            <div>
+              <div className="text-3xl font-black text-white">
+                {history.length} <span className="text-sm font-normal text-slate-400">QC batches</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                Total tracks inspected: {history.reduce((acc, b) => acc + (b.summary?.total_files || 0), 0)}
               </p>
             </div>
-          )}
+            <p className="text-[11px] text-slate-400">
+              Retained in browser storage for instant retrieval and re-export.
+            </p>
+          </div>
         </div>
 
-        {/* QC History Section */}
-        <div className="space-y-4 pt-4">
+        {/* Local Device Storage Notice Banner */}
+        <div className="p-4 rounded-2xl bg-blue-950/20 border border-blue-500/30 text-xs text-blue-200 flex items-start gap-3 shadow-md">
+          <Info className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <span className="font-bold text-white">Local Device Storage Notice:</span>
+            <p className="text-slate-300">
+              Inspection certificates and batch metrics are stored securely in this browser&apos;s local storage. Download your PDF Certificates or CSV spreadsheets to keep permanent records on your computer, as clearing browser cache or switching devices will reset local inspection history.
+            </p>
+          </div>
+        </div>
+
+        {/* History / Recent QC Batches Section */}
+        <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <Clock className="w-5 h-5 text-cyan-400" />
-              <h2 className="text-lg font-bold text-white tracking-tight">Recent QC Inspections</h2>
-            </div>
+              <span>Recent QC Inspections</span>
+            </h2>
+            {history.length > 0 && (
+              <span className="text-xs text-slate-400">Showing last {history.length} batches</span>
+            )}
           </div>
 
-          {userTier === 'FREE' ? (
-            <div className="p-8 rounded-2xl bg-slate-900/40 border border-slate-800 text-center space-y-3">
-              <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 flex items-center justify-center mx-auto">
-                <Lock className="w-5 h-5" />
+          {history.length === 0 ? (
+            <div className="p-12 text-center rounded-2xl border border-dashed border-slate-800 bg-slate-900/30 space-y-4">
+              <Layers className="w-10 h-10 text-slate-600 mx-auto" />
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-white">No Inspection History Yet</h3>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  Run your first audio QC analysis to see your batches, compliance status, and downloadable reports here.
+                </p>
               </div>
-              <h3 className="text-base font-bold text-white">QC History is available on Pro</h3>
-              <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Upgrade to Pro to automatically preserve past inspection records, re-download certificates, and track loudness trends over time.
-              </p>
-              <button
-                type="button"
-                onClick={() => triggerGate('Inspection History', 'Saved QC history and instant report downloads are available on Pro.', 'PRO')}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 transition-all cursor-pointer"
+              <Link
+                href="/check"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-md shadow-cyan-500/20 active:scale-95 transition-all"
               >
-                <span>Unlock History on Pro (€4.99/mo)</span>
-              </button>
-            </div>
-          ) : history.length === 0 ? (
-            <div className="p-8 rounded-2xl bg-slate-900/40 border border-slate-800 text-center text-slate-400 text-xs">
-              No recent inspections found. Run your first check on the <Link href="/check" className="text-cyan-400 underline">QC Workspace</Link>.
+                <span>Start Audio QC</span>
+                <ArrowRight className="w-4 h-4" />
+              </Link>
             </div>
           ) : (
             <div className="space-y-3">
-              {history.map((batch) => (
-                <div
-                  key={batch.batch_id}
-                  className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full flex-shrink-0 ${
-                      batch.overall_status === 'PASS' ? 'bg-emerald-400' :
-                      batch.overall_status === 'WARNING' ? 'bg-amber-400' : 'bg-rose-400'
-                    }`} />
-                    <div>
-                      <h4 className="font-bold text-white">
-                        {batch.files.length === 1 ? batch.files[0].filename : `${batch.files.length} Files Batch`}
-                      </h4>
-                      <div className="flex items-center gap-2 text-slate-400 text-[11px] mt-0.5">
-                        <span>Profile: {batch.profile_name}</span>
+              {history.map((batch) => {
+                const isPass = batch.overall_status === 'PASS';
+                const isWarn = batch.overall_status === 'WARNING';
+
+                return (
+                  <div
+                    key={batch.batch_id}
+                    className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-slate-700 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded border ${
+                          isPass ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                          isWarn ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                          'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                        }`}>
+                          {isPass ? <CheckCircle2 className="w-3 h-3" /> : isWarn ? <AlertTriangle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                          <span>{batch.overall_status}</span>
+                        </span>
+                        <span className="text-sm font-bold text-white truncate">
+                          {batch.profile_name || 'Standard Delivery'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-slate-400 flex-wrap">
+                        <span>{batch.summary?.total_files || 1} file{(batch.summary?.total_files || 1) > 1 ? 's' : ''}</span>
                         <span>&bull;</span>
                         <span>{new Date(batch.created_at).toLocaleDateString()}</span>
-                        {batch.summary.avg_lufs && (
+                        {batch.summary?.avg_lufs !== null && batch.summary?.avg_lufs !== undefined && (
                           <>
                             <span>&bull;</span>
-                            <span className="text-cyan-300 font-mono">{batch.summary.avg_lufs} LUFS</span>
+                            <span>Avg: <span className="font-mono text-cyan-300">{batch.summary.avg_lufs} LUFS</span></span>
+                          </>
+                        )}
+                        {batch.summary?.highest_true_peak_dbtp !== null && batch.summary?.highest_true_peak_dbtp !== undefined && (
+                          <>
+                            <span>&bull;</span>
+                            <span>Peak: <span className="font-mono text-slate-200">{batch.summary.highest_true_peak_dbtp} dBTP</span></span>
                           </>
                         )}
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 self-start sm:self-center">
-                    <button
-                      type="button"
-                      onClick={() => downloadPdfReport(batch, userTier)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs transition-colors"
-                      title="Download PDF certificate"
-                    >
-                      <FileDown className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>PDF</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => downloadCsvReport(batch, userTier)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs transition-colors"
-                      title="Download CSV report"
-                    >
-                      <FileSpreadsheet className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>CSV</span>
-                    </button>
+                    <div className="flex items-center gap-2 self-start sm:self-center flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!tierConfig.allowPdfExport) {
+                            triggerGate('PDF QC Certificate', 'Export cryptographic PDF inspection certificates with SHA-256 signatures for your clients.', 'PRO');
+                            return;
+                          }
+                          downloadPdfReport(batch);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 transition-colors cursor-pointer"
+                      >
+                        <FileDown className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>PDF Report</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!tierConfig.allowCsvExport) {
+                            triggerGate('CSV Matrix Export', 'Download structured CSV inspection reports and multi-track metadata spreadsheets.', 'PRO');
+                            return;
+                          }
+                          downloadCsvReport(batch);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 transition-colors cursor-pointer"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>CSV Matrix</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
+
+        {/* Upgrade Prompt Modal */}
+        <UpgradePromptModal
+          prompt={upgradePrompt}
+          onClose={() => setUpgradePrompt(null)}
+        />
       </div>
-
-      {/* New Project Modal (Studio) */}
-      {showNewProjectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-            <h3 className="font-bold text-white text-base">Create New Studio Project</h3>
-            <form onSubmit={handleCreateProject} className="space-y-4 text-xs">
-              <div className="space-y-1">
-                <label className="text-slate-300">Project / Album Title</label>
-                <input
-                  type="text"
-                  required
-                  value={newProjectName}
-                  onChange={(e) => setNewProjectName(e.target.value)}
-                  placeholder="e.g. Master Delivery 2026"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-400"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-slate-300">Client / Label</label>
-                <input
-                  type="text"
-                  value={newClientName}
-                  onChange={(e) => setNewClientName(e.target.value)}
-                  placeholder="e.g. Warner Music / Independent"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-400"
-                />
-              </div>
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowNewProjectModal(false)}
-                  className="px-3 py-2 rounded-xl text-slate-400 hover:text-slate-200"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors"
-                >
-                  Save Project
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Feature Gating Modal */}
-      <UpgradePromptModal
-        prompt={upgradePrompt}
-        onClose={() => setUpgradePrompt(null)}
-      />
     </div>
   );
 }

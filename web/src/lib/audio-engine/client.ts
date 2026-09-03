@@ -1,38 +1,35 @@
 import { LocalAudioMeasurements, WorkerRequest, WorkerResponse } from './types';
 import { analyzeWavBuffer } from './analyzer';
+import { analyzeAudioBufferUniversal } from './universal-analyzer';
 
 export interface LocalAnalysisProgressCallback {
   (stage: string, message: string, percent: number): void;
 }
 
-export async function analyzeWavFileLocally(
+export async function analyzeAudioFileLocally(
   file: File,
   onProgress?: LocalAnalysisProgressCallback
 ): Promise<LocalAudioMeasurements> {
-  // If file is not WAV/RIFF, provide a clear friendly error
-  if (!file.name.toLowerCase().endsWith('.wav')) {
-    throw new Error(
-      `Browser analysis currently supports WAV files. "${file.name}" requires Python Reference Engine processing.`
-    );
-  }
+  const isWav = file.name.toLowerCase().endsWith('.wav');
 
-  // If Web Worker is supported in browser
-  if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
+  // For WAV files, try ultra-fast Web Worker first if available
+  if (isWav && typeof window !== 'undefined' && typeof Worker !== 'undefined') {
     try {
       return await analyzeWithWorker(file, onProgress);
     } catch (workerErr) {
-      console.warn('Worker analysis failed or was blocked; falling back to main thread async DSP:', workerErr);
+      console.warn('Worker analysis failed or was blocked; falling back to universal DSP:', workerErr);
     }
   }
 
-  // Main thread fallback (in chunks/async)
+  // Universal browser decoder (WAV, MP3, FLAC, AAC, M4A, OGG, AIFF)
   if (onProgress) onProgress('READING_FILE', 'Reading audio data into memory...', 10);
   const buffer = await file.arrayBuffer();
 
-  return await analyzeWavBuffer(buffer, file.name, (stage, percent) => {
+  return await analyzeAudioBufferUniversal(buffer, file.name, (stage, percent) => {
     if (onProgress) {
       const messages: Record<string, string> = {
         PARSING_WAV: 'Parsing WAV header & PCM audio streams...',
+        DECODING_AUDIO: `Decoding ${file.name.split('.').pop()?.toUpperCase() || 'audio'} stream in browser...`,
         HASHING_FILE: 'Calculating cryptographic SHA-256 hash...',
         ANALYZING_METRICS: 'Calculating DSP sample peaks, RMS energy, DC offset, clipping & silence...',
         ANALYZING_LUFS: 'Measuring ITU-R BS.1770-4 Integrated LUFS & EBU Tech 3342 LRA...',
@@ -43,6 +40,9 @@ export async function analyzeWavFileLocally(
     }
   });
 }
+
+// Backwards-compatible alias
+export const analyzeWavFileLocally = analyzeAudioFileLocally;
 
 function analyzeWithWorker(
   file: File,

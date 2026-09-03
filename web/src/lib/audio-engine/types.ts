@@ -1,7 +1,7 @@
 export interface WavMetadata {
-  format: 'WAV' | 'WAVE';
+  format: string; // 'WAV', 'MP3', 'FLAC', 'AAC', 'M4A', etc.
   audioFormat: number; // 1 = PCM, 3 = IEEE Float
-  audioFormatName: string; // "PCM" or "IEEE Float"
+  audioFormatName: string; // "PCM" or "Compressed/Decoded"
   channels: number;
   channelLayout: string; // "Mono", "Stereo", "5.1 Surround", etc.
   sampleRate: number;

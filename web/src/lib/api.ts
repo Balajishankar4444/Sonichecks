@@ -79,18 +79,7 @@ export const DEFAULT_QC_PROFILES: QCProfile[] = [
 ];
 
 export async function getQCProfiles(): Promise<QCProfile[]> {
-  try {
-    const res = await fetch(`${AUDIO_ENGINE_URL}/api/profiles`, { 
-      cache: 'no-store',
-      signal: AbortSignal.timeout(1500) // Fast 1.5s timeout for local microservice
-    });
-    if (!res.ok) return DEFAULT_QC_PROFILES;
-    const remote = await res.json();
-    return Array.isArray(remote) && remote.length > 0 ? remote : DEFAULT_QC_PROFILES;
-  } catch (err) {
-    // Graceful offline fallback
-    return DEFAULT_QC_PROFILES;
-  }
+  return DEFAULT_QC_PROFILES;
 }
 
 export async function analyzeSingleFile(
@@ -157,40 +146,17 @@ export async function analyzeBatchFiles(
   return await res.json();
 }
 
+import { downloadPdfLocally } from './reports/pdf-export';
+import { downloadCsvLocally } from './reports/csv-export';
+
 export async function downloadPdfReport(
   batchResult: BatchQCResult,
   productTier: ProductTier = 'PRO'
 ): Promise<void> {
   try {
-    const res = await fetch(`${AUDIO_ENGINE_URL}/api/export/pdf`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-product-tier': productTier
-      },
-      body: JSON.stringify(batchResult)
-    });
-
-    if (!res.ok) {
-      let msg = `PDF Generation failed (HTTP ${res.status})`;
-      try {
-        const errJson = await res.json();
-        if (errJson.detail) msg = errJson.detail;
-      } catch (_) {}
-      throw new Error(msg);
-    }
-
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Sonichecks_QC_Report_${batchResult.batch_id.slice(0, 8)}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+    downloadPdfLocally(batchResult);
   } catch (err: any) {
-    alert(`Could not download PDF report: ${err.message}`);
+    alert(`Could not generate PDF certificate: ${err.message}`);
   }
 }
 
@@ -199,34 +165,8 @@ export async function downloadCsvReport(
   productTier: ProductTier = 'PRO'
 ): Promise<void> {
   try {
-    const res = await fetch(`${AUDIO_ENGINE_URL}/api/export/csv`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-product-tier': productTier
-      },
-      body: JSON.stringify(batchResult)
-    });
-
-    if (!res.ok) {
-      let msg = `CSV Export failed (HTTP ${res.status})`;
-      try {
-        const errJson = await res.json();
-        if (errJson.detail) msg = errJson.detail;
-      } catch (_) {}
-      throw new Error(msg);
-    }
-
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Sonichecks_Batch_QC_${batchResult.batch_id.slice(0, 8)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+    downloadCsvLocally(batchResult);
   } catch (err: any) {
-    alert(`Could not download CSV export: ${err.message}`);
+    alert(`Could not generate CSV export: ${err.message}`);
   }
 }

@@ -2,20 +2,17 @@
 
 import React, { useState, useMemo } from 'react';
 import { 
-  Table, 
   CheckCircle2, 
   AlertTriangle, 
   XCircle, 
-  Lock, 
   ArrowUpDown, 
   ArrowUp, 
   ArrowDown, 
-  ChevronRight, 
-  ExternalLink,
-  Volume2,
-  Info,
+  Eye, 
+  Lock,
+  Table,
   Sparkles,
-  Eye
+  Info
 } from 'lucide-react';
 import { BatchQCResult, FileQCResult, QCStatus } from '@/types/qc';
 import FileResultCard from './FileResultCard';
@@ -53,7 +50,7 @@ export default function BatchComparisonMatrix({
 
   // Determine majority batch values for difference highlighting
   const majorityStats = useMemo(() => {
-    const valid = batchResult.files.filter((f) => f.file_info !== null);
+    const valid = (batchResult?.files || []).filter((f) => Boolean(f && f.file_info));
     if (valid.length === 0) return { sr: null, bd: null, fmt: null, layout: null };
 
     const getMode = (arr: any[]) => {
@@ -75,12 +72,12 @@ export default function BatchComparisonMatrix({
     };
 
     return {
-      sr: getMode(valid.map((f) => f.file_info!.sample_rate)),
-      bd: getMode(valid.map((f) => f.file_info!.bit_depth)),
-      fmt: getMode(valid.map((f) => f.file_info!.format?.toUpperCase())),
-      layout: getMode(valid.map((f) => f.file_info!.channel_layout))
+      sr: getMode(valid.map((f) => f.file_info?.sample_rate)),
+      bd: getMode(valid.map((f) => f.file_info?.bit_depth)),
+      fmt: getMode(valid.map((f) => f.file_info?.format?.toUpperCase())),
+      layout: getMode(valid.map((f) => f.file_info?.channel_layout))
     };
-  }, [batchResult.files]);
+  }, [batchResult?.files]);
 
   // Handle header column sorting
   const handleSort = (column: MatrixSortColumn) => {
@@ -94,7 +91,7 @@ export default function BatchComparisonMatrix({
 
   // Sorted files
   const sortedFiles = useMemo(() => {
-    const files = [...batchResult.files];
+    const files = [...(batchResult?.files || [])];
 
     files.sort((a, b) => {
       let comparison = 0;
@@ -148,7 +145,7 @@ export default function BatchComparisonMatrix({
     });
 
     return files;
-  }, [batchResult.files, sortColumn, sortDirection]);
+  }, [batchResult?.files, sortColumn, sortDirection]);
 
   const renderSortIndicator = (col: MatrixSortColumn) => {
     if (sortColumn !== col) {
@@ -165,14 +162,14 @@ export default function BatchComparisonMatrix({
     switch (status) {
       case 'PASS':
         return (
-          <span className="inline-flex items-center gap-1 font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 text-[11px]">
+          <span className="inline-flex items-center gap-1 font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 text-[10px]">
             <CheckCircle2 className="w-3 h-3" />
             <span>PASS</span>
           </span>
         );
       case 'WARNING':
         return (
-          <span className="inline-flex items-center gap-1 font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 text-[11px]">
+          <span className="inline-flex items-center gap-1 font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 text-[10px]">
             <AlertTriangle className="w-3 h-3" />
             <span>WARN</span>
           </span>
@@ -181,7 +178,7 @@ export default function BatchComparisonMatrix({
       case 'FAIL':
       default:
         return (
-          <span className="inline-flex items-center gap-1 font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20 text-[11px]">
+          <span className="inline-flex items-center gap-1 font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20 text-[10px]">
             <XCircle className="w-3 h-3" />
             <span>{status === 'ERROR' ? 'ERROR' : 'FAIL'}</span>
           </span>
@@ -223,7 +220,7 @@ export default function BatchComparisonMatrix({
   }
 
   return (
-    <div className="w-full rounded-2xl bg-slate-900/70 border border-slate-800 overflow-hidden space-y-3 shadow-xl">
+    <div className="w-full rounded-2xl bg-slate-900/70 border border-slate-800 overflow-hidden space-y-2 shadow-xl">
       {/* Matrix Header */}
       <div className="p-4 sm:p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
@@ -235,7 +232,7 @@ export default function BatchComparisonMatrix({
               Batch QC Comparison Matrix
             </h3>
             <p className="text-xs text-slate-400">
-              Deterministic technical &amp; loudness alignment across {batchResult.files.length} tracks
+              Deterministic technical &amp; loudness alignment across {batchResult?.files?.length || 0} tracks
             </p>
           </div>
         </div>
@@ -246,113 +243,95 @@ export default function BatchComparisonMatrix({
             <span>Variation / Outlier</span>
           </span>
           <span>&bull;</span>
-          <span className="text-slate-400">Click any row to view full file details</span>
+          <span className="text-slate-400">Click row or Inspect to expand details</span>
         </div>
       </div>
 
-      {/* Desktop / Tablet Scrollable Matrix Table */}
-      <div className="overflow-x-auto custom-scrollbar pb-2">
-        <table className="w-full text-left text-xs border-collapse min-w-[1050px]" aria-label="Batch QC Comparison Matrix">
+      {/* 100% Full-Width Matrix Table with safe inner spacing */}
+      <div className="w-full px-2 pb-2">
+        <table className="w-full text-left text-xs border-collapse table-fixed" aria-label="Batch QC Comparison Matrix">
           <thead>
-            <tr className="border-b border-slate-800 bg-slate-950/70 text-slate-400 text-[11px] uppercase tracking-wider font-mono">
-              <th scope="col" className="py-3 px-4">
+            <tr className="border-b border-slate-800 bg-slate-950/70 text-slate-400 text-[10px] sm:text-[11px] uppercase tracking-wider font-mono">
+              <th scope="col" className="py-2.5 px-3 w-[26%] sm:w-[24%]">
                 <button
                   type="button"
                   onClick={() => handleSort('FILENAME')}
-                  className="flex items-center hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400 rounded px-1"
+                  className="flex items-center hover:text-white transition-colors focus:outline-none rounded px-0.5"
                 >
-                  <span>Filename</span>
+                  <span>Track &bull; Duration</span>
                   {renderSortIndicator('FILENAME')}
                 </button>
               </th>
-              <th scope="col" className="py-3 px-3">
+              <th scope="col" className="py-2.5 px-2 w-[12%] sm:w-[10%] text-center">
                 <button
                   type="button"
                   onClick={() => handleSort('STATUS')}
-                  className="flex items-center hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400 rounded px-1"
+                  className="inline-flex items-center hover:text-white transition-colors focus:outline-none rounded px-0.5"
                 >
                   <span>Status</span>
                   {renderSortIndicator('STATUS')}
                 </button>
               </th>
-              <th scope="col" className="py-3 px-3">Format</th>
-              <th scope="col" className="py-3 px-3">
+              <th scope="col" className="py-2.5 px-2 w-[18%] sm:w-[17%]">
                 <button
                   type="button"
                   onClick={() => handleSort('SAMPLE_RATE')}
-                  className="flex items-center hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400 rounded px-1"
+                  className="flex items-center hover:text-white transition-colors focus:outline-none rounded px-0.5"
                 >
-                  <span>Sample Rate</span>
+                  <span>Format &bull; Specs</span>
                   {renderSortIndicator('SAMPLE_RATE')}
                 </button>
               </th>
-              <th scope="col" className="py-3 px-3">
-                <button
-                  type="button"
-                  onClick={() => handleSort('BIT_DEPTH')}
-                  className="flex items-center hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400 rounded px-1"
-                >
-                  <span>Bit Depth</span>
-                  {renderSortIndicator('BIT_DEPTH')}
-                </button>
-              </th>
-              <th scope="col" className="py-3 px-3">Channels</th>
-              <th scope="col" className="py-3 px-3">
-                <button
-                  type="button"
-                  onClick={() => handleSort('DURATION')}
-                  className="flex items-center hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400 rounded px-1"
-                >
-                  <span>Duration</span>
-                  {renderSortIndicator('DURATION')}
-                </button>
-              </th>
-              <th scope="col" className="py-3 px-3">
+              <th scope="col" className="py-2.5 px-2 w-[16%] sm:w-[15%]">
                 <button
                   type="button"
                   onClick={() => handleSort('LUFS')}
-                  className="flex items-center hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400 rounded px-1"
+                  className="flex items-center hover:text-white transition-colors focus:outline-none rounded px-0.5"
                 >
-                  <span>Int. LUFS</span>
+                  <span>Loudness (LUFS)</span>
                   {renderSortIndicator('LUFS')}
                 </button>
               </th>
-              <th scope="col" className="py-3 px-3">Short-Term</th>
-              <th scope="col" className="py-3 px-3">
+              <th scope="col" className="py-2.5 px-2 w-[14%] sm:w-[13%]">
                 <button
                   type="button"
                   onClick={() => handleSort('TRUE_PEAK')}
-                  className="flex items-center hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400 rounded px-1"
+                  className="flex items-center hover:text-white transition-colors focus:outline-none rounded px-0.5"
                 >
-                  <span>True Peak</span>
+                  <span>True Peak &bull; Clip</span>
                   {renderSortIndicator('TRUE_PEAK')}
                 </button>
               </th>
-              <th scope="col" className="py-3 px-3">Clipping</th>
-              <th scope="col" className="py-3 px-3">Silence</th>
-              <th scope="col" className="py-3 px-3">
+              <th scope="col" className="py-2.5 px-2 w-[6%] sm:w-[6%] text-center">
                 <button
                   type="button"
                   onClick={() => handleSort('WARNINGS')}
-                  className="flex items-center hover:text-white transition-colors focus:outline-none focus:ring-1 focus:ring-cyan-400 rounded px-1"
+                  className="inline-flex items-center hover:text-white transition-colors focus:outline-none rounded px-0.5"
+                  title="Warnings / Failures count"
                 >
-                  <span>Warn/Fail</span>
+                  <span>Issues</span>
                   {renderSortIndicator('WARNINGS')}
                 </button>
               </th>
-              <th scope="col" className="py-3 px-3 text-right">Details</th>
+              <th scope="col" className="py-2.5 px-3 w-[12%] sm:w-[15%] text-right pr-4">
+                <span>Action</span>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60">
             {sortedFiles.map((f) => {
               const info = f.file_info;
-              const warnCount = f.checks.filter((c) => c.status === 'WARNING').length;
-              const failCount = f.checks.filter((c) => c.status === 'FAIL' || c.status === 'ERROR').length;
+              const warnCount = f.checks?.filter((c) => c.status === 'WARNING').length || 0;
+              const failCount = f.checks?.filter((c) => c.status === 'FAIL' || c.status === 'ERROR').length || 0;
 
               const isSrDifferent = info && majorityStats.sr && String(info.sample_rate) !== majorityStats.sr;
               const isBdDifferent = info && majorityStats.bd && String(info.bit_depth) !== majorityStats.bd;
-              const isFmtDifferent = info && majorityStats.fmt && info.format.toUpperCase() !== majorityStats.fmt;
+              const isFmtDifferent = info && majorityStats.fmt && info.format?.toUpperCase() !== majorityStats.fmt;
               const isLayoutDifferent = info && majorityStats.layout && info.channel_layout !== majorityStats.layout;
+
+              const durationStr = info?.duration_seconds 
+                ? `${Math.floor(info.duration_seconds / 60)}:${Math.floor(info.duration_seconds % 60).toString().padStart(2, '0')}`
+                : '0:00';
 
               return (
                 <tr
@@ -366,116 +345,86 @@ export default function BatchComparisonMatrix({
                   }}
                   className="hover:bg-slate-800/40 transition-colors cursor-pointer group"
                 >
-                  {/* Filename */}
-                  <td className="py-3.5 px-4 font-medium text-slate-200 truncate max-w-[200px] group-hover:text-cyan-300">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate">{f.filename}</span>
+                  {/* Filename & Duration */}
+                  <td className="py-3 px-3 min-w-0">
+                    <div className="font-semibold text-slate-200 truncate group-hover:text-cyan-300 text-xs transition-colors">
+                      {f.filename}
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5 font-mono">
+                      <span>{durationStr}</span>
+                      <span>&bull;</span>
+                      <span className="text-slate-300">{info?.format || 'WAV'}</span>
                     </div>
                   </td>
 
-                  {/* Status */}
-                  <td className="py-3.5 px-3 whitespace-nowrap">
+                  {/* Status Badge */}
+                  <td className="py-3 px-2 text-center whitespace-nowrap">
                     {getStatusBadge(f.overall_status)}
                   </td>
 
-                  {/* Format */}
-                  <td className="py-3.5 px-3 font-mono">
-                    <span className={isFmtDifferent ? 'text-amber-400 font-bold bg-amber-500/10 px-1 py-0.5 rounded' : 'text-slate-300'}>
-                      {info?.format || 'N/A'}
-                    </span>
-                  </td>
-
-                  {/* Sample Rate */}
-                  <td className="py-3.5 px-3 font-mono">
-                    {info ? (
-                      <span className={isSrDifferent ? 'text-amber-400 font-bold bg-amber-500/10 px-1 py-0.5 rounded' : 'text-slate-300'}>
-                        {info.sample_rate / 1000} kHz
+                  {/* Format & Tech Specs */}
+                  <td className="py-3 px-2 font-mono text-[11px] min-w-0">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className={isSrDifferent ? 'text-amber-400 font-bold bg-amber-500/10 px-1 py-0.2 rounded' : 'text-slate-200'}>
+                        {info ? `${(info.sample_rate / 1000).toFixed(1)}k` : 'N/A'}
                       </span>
-                    ) : (
-                      'N/A'
-                    )}
-                  </td>
-
-                  {/* Bit Depth */}
-                  <td className="py-3.5 px-3 font-mono">
-                    {info?.bit_depth ? (
-                      <span className={isBdDifferent ? 'text-amber-400 font-bold bg-amber-500/10 px-1 py-0.5 rounded' : 'text-slate-300'}>
-                        {info.bit_depth}-bit
+                      <span>/</span>
+                      <span className={isBdDifferent ? 'text-amber-400 font-bold bg-amber-500/10 px-1 py-0.2 rounded' : 'text-slate-200'}>
+                        {info?.bit_depth ? `${info.bit_depth}b` : '16b'}
                       </span>
-                    ) : (
-                      <span className="text-slate-500">N/A</span>
-                    )}
-                  </td>
-
-                  {/* Channels */}
-                  <td className="py-3.5 px-3 font-mono text-slate-300">
-                    <span className={isLayoutDifferent ? 'text-amber-400 font-bold bg-amber-500/10 px-1 py-0.5 rounded' : ''}>
-                      {info?.channel_layout || 'N/A'}
-                    </span>
-                  </td>
-
-                  {/* Duration */}
-                  <td className="py-3.5 px-3 font-mono text-slate-300">
-                    {info ? `${info.duration_seconds}s` : 'N/A'}
-                  </td>
-
-                  {/* Integrated LUFS */}
-                  <td className="py-3.5 px-3 font-mono font-bold text-cyan-300">
-                    {f.loudness?.integrated_lufs !== null && f.loudness?.integrated_lufs !== undefined
-                      ? `${f.loudness.integrated_lufs} LUFS`
-                      : 'N/A'}
-                  </td>
-
-                  {/* Short-term LUFS */}
-                  <td className="py-3.5 px-3 font-mono text-slate-400">
-                    {f.loudness?.short_term_max_lufs !== null && f.loudness?.short_term_max_lufs !== undefined
-                      ? `${f.loudness.short_term_max_lufs}`
-                      : 'N/A'}
-                  </td>
-
-                  {/* True Peak */}
-                  <td className="py-3.5 px-3 font-mono">
-                    {f.peaks ? (
-                      <span className={f.peaks.true_peak_dbtp > -1.0 ? 'text-amber-400 font-bold' : 'text-slate-200'}>
-                        {f.peaks.true_peak_dbtp} dBTP
+                      <span>&bull;</span>
+                      <span className={isLayoutDifferent ? 'text-amber-400 font-bold bg-amber-500/10 px-1 py-0.2 rounded text-[10px]' : 'text-slate-400 text-[10px]'}>
+                        {info?.channel_layout || 'Stereo'}
                       </span>
-                    ) : (
-                      'N/A'
-                    )}
-                  </td>
-
-                  {/* Clipping */}
-                  <td className="py-3.5 px-3 font-mono">
-                    {f.clipping?.clipping_detected ? (
-                      <span className="text-rose-400 font-bold bg-rose-500/10 px-1.5 py-0.5 rounded">
-                        {f.clipping.clipped_samples} smp
-                      </span>
-                    ) : (
-                      <span className="text-emerald-400 font-medium">None</span>
-                    )}
-                  </td>
-
-                  {/* Silence */}
-                  <td className="py-3.5 px-3 font-mono text-slate-400">
-                    {f.silence ? `${f.silence.leading_silence_sec}s / ${f.silence.trailing_silence_sec}s` : 'N/A'}
-                  </td>
-
-                  {/* Warnings / Failures Count */}
-                  <td className="py-3.5 px-3 font-mono">
-                    <div className="flex items-center gap-1.5">
-                      {warnCount > 0 && <span className="text-amber-400 font-bold">{warnCount}W</span>}
-                      {failCount > 0 && <span className="text-rose-400 font-bold">{failCount}F</span>}
-                      {warnCount === 0 && failCount === 0 && <span className="text-emerald-400">0</span>}
                     </div>
                   </td>
 
-                  {/* Action Link */}
-                  <td className="py-3.5 px-3 text-right">
+                  {/* Integrated LUFS & LRA */}
+                  <td className="py-3 px-2 font-mono text-xs">
+                    <div className="font-bold text-cyan-300">
+                      {f.loudness?.integrated_lufs !== null && f.loudness?.integrated_lufs !== undefined
+                        ? `${f.loudness.integrated_lufs} LUFS`
+                        : 'N/A'}
+                    </div>
+                    {f.loudness?.loudness_range_lu !== null && f.loudness?.loudness_range_lu !== undefined && (
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        LRA: {f.loudness.loudness_range_lu} LU
+                      </div>
+                    )}
+                  </td>
+
+                  {/* True Peak & Clipping */}
+                  <td className="py-3 px-2 font-mono text-xs">
+                    <div className={f.peaks && f.peaks.true_peak_dbtp > -1.0 ? 'text-amber-400 font-bold' : 'text-slate-200'}>
+                      {f.peaks?.true_peak_dbtp !== null && f.peaks?.true_peak_dbtp !== undefined ? `${f.peaks.true_peak_dbtp} dBTP` : 'N/A'}
+                    </div>
+                    <div className="text-[10px] mt-0.5">
+                      {f.clipping?.clipping_detected ? (
+                        <span className="text-rose-400 font-bold">Clip: {f.clipping.clipped_samples} smp</span>
+                      ) : (
+                        <span className="text-emerald-400">Clean</span>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* Warnings / Failures */}
+                  <td className="py-3 px-2 text-center font-mono text-xs">
+                    {failCount > 0 ? (
+                      <span className="text-rose-400 font-bold bg-rose-500/10 px-1.5 py-0.5 rounded">{failCount}F</span>
+                    ) : warnCount > 0 ? (
+                      <span className="text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">{warnCount}W</span>
+                    ) : (
+                      <span className="text-emerald-400 font-semibold">0</span>
+                    )}
+                  </td>
+
+                  {/* Inspect Button (Generously Sized & Fully Visible) */}
+                  <td className="py-3 px-3 text-right pr-4 whitespace-nowrap">
                     <button
                       type="button"
-                      className="text-xs text-cyan-400 hover:text-cyan-300 font-medium inline-flex items-center gap-1 opacity-80 group-hover:opacity-100"
+                      className="text-xs text-cyan-300 hover:text-white font-bold inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 shadow-sm transition-all cursor-pointer"
                     >
-                      <Eye className="w-3.5 h-3.5" />
+                      <Eye className="w-3.5 h-3.5 text-cyan-400" />
                       <span>Inspect</span>
                     </button>
                   </td>
@@ -514,7 +463,7 @@ export default function BatchComparisonMatrix({
               <button
                 type="button"
                 onClick={() => setSelectedModalFile(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors"
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors cursor-pointer"
               >
                 Done / Close
               </button>

@@ -2,13 +2,15 @@ import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Metadata } from 'next';
-import { ShieldCheck, CheckCircle2, Volume2, Sliders, ArrowRight, Layers, FileAudio } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, Volume2, Sliders, ArrowRight, Layers, FileAudio, Headphones, Radio, Mic, Sparkles } from 'lucide-react';
 
 interface SeoTopic {
   title: string;
   metaTitle: string;
   metaDescription: string;
   badge: string;
+  targetProfileId: string;
+  targetProfileName: string;
   heroHeadline: string;
   heroSubtitle: string;
   keyPoints: { title: string; desc: string }[];
@@ -21,6 +23,8 @@ const SEO_CONTENT: Record<string, SeoTopic> = {
     metaTitle: 'Audio Quality Checker — Check WAV, LUFS, Peak & Clipping | Sonichecks',
     metaDescription: 'Check audio files for loudness, true peak, clipping, sample rate, bit depth, silence and delivery consistency.',
     badge: 'Automated QC Utility',
+    targetProfileId: 'standard',
+    targetProfileName: 'Standard Delivery',
     heroHeadline: 'Professional Audio Quality Checker for Modern Deliverables',
     heroSubtitle: 'Inspect WAV, AIFF, and FLAC files before submitting to distributors, streaming services, or mastering clients.',
     keyPoints: [
@@ -39,8 +43,10 @@ const SEO_CONTENT: Record<string, SeoTopic> = {
     title: 'Audio Quality Control',
     metaTitle: 'Audio QC — Automated Audio Inspection & Verification | Sonichecks',
     metaDescription: 'Comprehensive audio quality control: detect sample rate mismatch, bit depth discrepancies, and clipping distortion.',
-    badge: 'Audio Quality Control',
-    heroHeadline: 'Instant Audio QC for Music, Podcasts & Audiobooks',
+    badge: 'Broadcast & Delivery QC',
+    targetProfileId: 'broadcast_ebu',
+    targetProfileName: 'Broadcast (EBU R128)',
+    heroHeadline: 'Instant Audio QC for Music, Broadcast & Audiobooks',
     heroSubtitle: 'Eliminate delivery rejections with deterministic quality control rules and downloadable PDF certificates.',
     keyPoints: [
       { title: 'Batch Uniformity', desc: 'Automatically cross-reference tracks in an album to verify sample rates and bit depths match.' },
@@ -57,7 +63,9 @@ const SEO_CONTENT: Record<string, SeoTopic> = {
     title: 'Loudness Checker',
     metaTitle: 'LUFS Loudness Checker — Measure Integrated LUFS & LRA | Sonichecks',
     metaDescription: 'Free online LUFS loudness checker. Measure integrated LUFS, short-term loudness, and loudness range accurately.',
-    badge: 'LUFS Measurement',
+    badge: 'LUFS & Dynamics Engine',
+    targetProfileId: 'streaming',
+    targetProfileName: 'Streaming (Spotify / Apple Music)',
     heroHeadline: 'Deterministic LUFS Loudness Checker (ITU-R BS.1770-4)',
     heroSubtitle: 'Know your exact Integrated LUFS, Short-term max, and Loudness Range (LRA) across single tracks and album batches.',
     keyPoints: [
@@ -66,6 +74,7 @@ const SEO_CONTENT: Record<string, SeoTopic> = {
       { title: 'Target Normalization', desc: 'Never worry about your music getting squashed or turned down by streaming algorithms.' }
     ],
     targetTable: [
+      { platform: 'Spotify / Apple Music', targetLufs: '-14 to -16 LUFS', maxTruePeak: '-1.0 dBTP', notes: 'Optimized streaming profile for online distribution.' },
       { platform: 'Tidal', targetLufs: '-14 LUFS', maxTruePeak: '-1.0 dBTP', notes: 'Applies volume normalization based on BS.1770-4 standard.' },
       { platform: 'Amazon Music', targetLufs: '-14 LUFS', maxTruePeak: '-1.0 dBTP', notes: 'Normalizes both albums and single tracks.' },
       { platform: 'Podcasts (PRX / Spotify)', targetLufs: '-16 to -19 LUFS', maxTruePeak: '-1.0 dBTP', notes: 'Industry dialogue standard for podcasts and broadcast journalism.' }
@@ -75,7 +84,9 @@ const SEO_CONTENT: Record<string, SeoTopic> = {
     title: 'WAV File Checker',
     metaTitle: 'WAV File Checker — Inspect Sample Rate, Bit Depth & Peak | Sonichecks',
     metaDescription: 'Inspect WAV files for true peak, clipping, sample rate integrity, bit depth (16/24-bit), and delivery compliance.',
-    badge: 'WAV Validator',
+    badge: 'PCM & WAV Validator',
+    targetProfileId: 'standard',
+    targetProfileName: 'Standard Delivery',
     heroHeadline: 'Complete WAV Audio Inspection & Validation',
     heroSubtitle: 'Confirm sample rate (44.1k/48k/96k), bit depth (16/24/32-bit), channel layout, and true peak before delivery.',
     keyPoints: [
@@ -92,61 +103,76 @@ const SEO_CONTENT: Record<string, SeoTopic> = {
     title: 'Audio File Validator',
     metaTitle: 'Audio File Validator — Detect Corrupted Audio & Format Errors | Sonichecks',
     metaDescription: 'Validate audio files for format corruption, header integrity, silence defects, and clipping runs.',
-    badge: 'File Integrity',
+    badge: 'Audio File Validator',
+    targetProfileId: 'standard',
+    targetProfileName: 'Standard Delivery',
     heroHeadline: 'Audio File Validator & Quality Inspection',
     heroSubtitle: 'Ensure audio files are clean, free of digital clipping, and ready for commercial ingestion pipelines.',
     keyPoints: [
       { title: 'Corruption Protection', desc: 'Identifies unrenderable files, damaged headers, and corrupted codecs.' },
       { title: 'Silence & Dead Air Audit', desc: 'Flags unintended long leading silence or missing head room tone.' },
-      { title: 'Privacy Guaranteed', desc: 'Zero data retention. Uploaded audio files are destroyed immediately after calculation.' }
+      { title: 'Clipping Detection', desc: 'Catches hard digital clipping before audio reaches distributor quality checks.' }
     ],
     targetTable: [
-      { platform: 'Bandcamp', targetLufs: 'Any (Master)', maxTruePeak: '-0.5 dBTP', notes: 'Accepts 24-bit WAV/FLAC; generates lossy formats on demand.' },
-      { platform: 'DistroKid / TuneCore', targetLufs: '-14 LUFS (Rec)', maxTruePeak: '-1.0 dBTP', notes: 'Standard aggregator distribution requirements.' }
+      { platform: 'Digital Ingestion Gate', targetLufs: 'Any', maxTruePeak: '< 0 dBFS', notes: 'Zero hard flat-top clipping tolerance on commercial distribution.' },
+      { platform: 'Audio Master Delivery', targetLufs: '-14 LUFS', maxTruePeak: '-1.0 dBTP', notes: 'Preserves transient headroom during MP3 / AAC lossy transcoding.' }
     ]
   },
   'audio-delivery-checker': {
     title: 'Audio Delivery Checker',
-    metaTitle: 'Audio Delivery Checker — Master Delivery Specification QC | Sonichecks',
-    metaDescription: 'Inspect master deliverables against Standard, Streaming, EBU R128, and ACX delivery specifications.',
-    badge: 'Delivery Standards',
-    heroHeadline: 'Audio Delivery Specification Checker',
-    heroSubtitle: 'Verify deliverables against custom and industry delivery profiles with automated PASS/FAIL checks.',
+    metaTitle: 'Audio Delivery Standards Checker — Streaming, Broadcast & ACX | Sonichecks',
+    metaDescription: 'Verify master audio deliverables against strict delivery specs for streaming services, broadcast networks, and audiobook platforms.',
+    badge: 'Delivery Compliance',
+    targetProfileId: 'streaming',
+    targetProfileName: 'Streaming (Spotify / Apple Music)',
+    heroHeadline: 'Automated Audio Delivery Compliance Checker',
+    heroSubtitle: 'Test your audio against strict technical standards for Spotify, Apple Music, Audible (ACX), and EBU R128 Broadcast.',
     keyPoints: [
-      { title: 'Pre-configured Profiles', desc: 'Switch effortlessly between Standard, Spotify/Apple, EBU R128 Broadcast, and ACX Audible profiles.' },
-      { title: 'Actionable Explanations', desc: 'Clear instructions on how to remedy failed metrics directly in your DAW.' },
-      { title: 'Multi-track Album Consistency', desc: 'Checks that all tracks in a release share consistent specs.' }
+      { title: 'Target Profiles', desc: 'Pre-configured compliance rules for Streaming, Broadcast EBU R128, ACX Audiobook, and Club Masters.' },
+      { title: 'Consistency Checks', desc: 'Verify all tracks in your release share matching sample rates, bit depths, and channel configurations.' },
+      { title: 'One-Click Certification', desc: 'Generate cryptographic PDF inspection certificates with track SHA-256 hashes.' }
     ],
     targetTable: [
-      { platform: 'Standard Delivery', targetLufs: '-18 to -12 LUFS', maxTruePeak: '-1.0 dBTP', notes: 'Balanced general-purpose modern master profile.' },
-      { platform: 'Streaming Target', targetLufs: '-14.0 LUFS', maxTruePeak: '-1.0 dBTP', notes: 'Eliminates lossy transcoding distortion.' },
-      { platform: 'ACX Audiobook', targetLufs: '-23 to -18 LUFS', maxTruePeak: '-3.0 dBTP', notes: 'Noise floor below -60 dB, 0.5s head silence, 1-5s tail silence.' }
+      { platform: 'Streaming (Spotify / Apple)', targetLufs: '-14 to -16 LUFS', maxTruePeak: '-1.0 dBTP', notes: 'Target delivery profile for all major digital streaming services.' },
+      { platform: 'Audiobook (ACX / Audible)', targetLufs: '-23 to -18 LUFS', maxTruePeak: '-3.0 dBTP', notes: 'Spoken-word requirement: 44.1 kHz, 16-bit, and noise floor below -60 dB.' },
+      { platform: 'Broadcast (EBU R128)', targetLufs: '-23.0 LUFS', maxTruePeak: '-1.0 dBTP', notes: 'Standard European broadcast audio specification.' },
+      { platform: 'Club / DJ Master', targetLufs: '-9 to -6 LUFS', maxTruePeak: '-0.1 dBTP', notes: 'High-energy master profile for dance and DJ playback.' }
     ]
   }
 };
 
+export async function generateStaticParams() {
+  return Object.keys(SEO_CONTENT).map((slug) => ({ slug }));
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
-  const { slug } = await params;
-  const data = SEO_CONTENT[slug];
-  if (!data) return { title: 'Sonichecks — Audio QC' };
+  const resolvedParams = await params;
+  const content = SEO_CONTENT[resolvedParams.slug];
+  if (!content) return { title: 'Audio QC Checker' };
 
   return {
-    title: data.metaTitle,
-    description: data.metaDescription,
+    title: content.metaTitle,
+    description: content.metaDescription,
+    alternates: {
+      canonical: `/${resolvedParams.slug}`
+    },
     openGraph: {
-      title: data.metaTitle,
-      description: data.metaDescription,
+      title: content.metaTitle,
+      description: content.metaDescription,
+      type: 'website'
     }
   };
 }
 
-export default async function SeoPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
-  const content = SEO_CONTENT[slug];
+export default async function SeoLandingPage({ params }: { params: Promise<{ slug: string }> }) {
+  const resolvedParams = await params;
+  const content = SEO_CONTENT[resolvedParams.slug];
 
   if (!content) {
     notFound();
   }
+
+  const checkUrl = `/check?profile=${content.targetProfileId}`;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 py-16 px-4 sm:px-6 lg:px-8">
@@ -165,17 +191,82 @@ export default async function SeoPage({ params }: { params: Promise<{ slug: stri
           </p>
           <div className="pt-2">
             <Link
-              href="/check"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-lg shadow-cyan-500/20 transition-all"
+              href={checkUrl}
+              className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl font-bold text-sm text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-lg shadow-cyan-500/25 transition-all"
             >
               <ShieldCheck className="w-4 h-4 stroke-[2.5]" />
-              <span>Check Your Audio Files Now</span>
+              <span>Inspect Audio with {content.targetProfileName} &rarr;</span>
+            </Link>
+          </div>
+        </div>
+
+        {/* Quick QC Delivery Target Presets */}
+        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3 text-center">
+          <div className="flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-cyan-400 font-mono">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Or Choose Another Preset Target:</span>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Link
+              href="/check?profile=standard"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                content.targetProfileId === 'standard' 
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' 
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+              }`}
+            >
+              <Layers className="w-3 h-3 text-cyan-400" />
+              <span>Standard Delivery</span>
+            </Link>
+            <Link
+              href="/check?profile=streaming"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                content.targetProfileId === 'streaming' 
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' 
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+              }`}
+            >
+              <Headphones className="w-3 h-3 text-emerald-400" />
+              <span>Streaming</span>
+            </Link>
+            <Link
+              href="/check?profile=broadcast_ebu"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                content.targetProfileId === 'broadcast_ebu' 
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' 
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+              }`}
+            >
+              <Radio className="w-3 h-3 text-blue-400" />
+              <span>Broadcast EBU R128</span>
+            </Link>
+            <Link
+              href="/check?profile=acx_audiobook"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                content.targetProfileId === 'acx_audiobook' 
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' 
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+              }`}
+            >
+              <Mic className="w-3 h-3 text-amber-400" />
+              <span>Audiobook ACX</span>
+            </Link>
+            <Link
+              href="/check?profile=club_loud"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                content.targetProfileId === 'club_loud' 
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' 
+                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+              }`}
+            >
+              <Volume2 className="w-3 h-3 text-purple-400" />
+              <span>Club Master</span>
             </Link>
           </div>
         </div>
 
         {/* Key QC Checks */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
           {content.keyPoints.map((pt, idx) => (
             <div key={idx} className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
               <h3 className="font-bold text-white text-sm flex items-center gap-2">
@@ -225,10 +316,10 @@ export default async function SeoPage({ params }: { params: Promise<{ slug: stri
             Drop your WAV, AIFF, FLAC, or MP3 files into the Sonichecks workspace and get an instant PASS/FAIL report.
           </p>
           <Link
-            href="/check"
+            href={checkUrl}
             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-md shadow-cyan-500/20"
           >
-            <span>Open Audio QC Workspace</span>
+            <span>Open Audio QC with {content.targetProfileName}</span>
             <ArrowRight className="w-4 h-4" />
           </Link>
         </div>

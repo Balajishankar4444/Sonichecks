@@ -10,11 +10,17 @@ import {
   onAuthStateChanged 
 } from 'firebase/auth';
 import { auth, googleProvider, isFirebaseConfigured } from '@/lib/firebase';
+import { syncUserWithFirestore, updateUserPlanInFirestore } from '@/lib/user-service';
+import { getUsageState, updatePlan, resetGuestSession } from '@/lib/storage';
 
 export interface SonichecksUser {
   uid: string;
   email: string | null;
   displayName?: string | null;
+  plan?: 'free' | 'pro' | 'studio';
+  tier?: 'FREE' | 'PRO' | 'STUDIO';
+  lastLoginAt?: string;
+  registeredAt?: string;
   isAnonymous?: boolean;
 }
 
@@ -28,6 +34,7 @@ interface AuthContextType {
   signInWithEmail: (email: string, pass: string) => Promise<void>;
   signUpWithEmail: (email: string, pass: string) => Promise<void>;
   signInWithLocalEmail: (email: string) => Promise<void>;
+  setUserPlan: (plan: 'free' | 'pro' | 'studio') => Promise<void>;
   logout: () => Promise<void>;
   authSuccessCallback: (() => void) | null;
 }
@@ -41,32 +48,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authSuccessCallback, setAuthSuccessCallback] = useState<(() => void) | null>(null);
 
+  const syncLoginWithServer = async (u: SonichecksUser) => {
+    if (!u.email) return;
+    try {
+      const res = await fetch('/api/user/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: u.email,
+          displayName: u.displayName
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.plan) {
+          u.plan = data.plan;
+          u.tier = data.tier || data.plan.toUpperCase();
+          u.lastLoginAt = data.lastLoginAt;
+          u.registeredAt = data.registeredAt;
+          updatePlan(data.plan, u.email);
+          setUser({ ...u });
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(u));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Server user sync notice:', err);
+    }
+  };
+
   useEffect(() => {
     // 1. Check local session storage first
+    let cachedUser: SonichecksUser | null = null;
     try {
       if (typeof window !== 'undefined') {
         const saved = localStorage.getItem(LOCAL_USER_KEY);
         if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed && parsed.email) {
-            setUser(parsed);
+          cachedUser = JSON.parse(saved);
+          if (cachedUser && cachedUser.email) {
+            const usage = getUsageState(cachedUser.email);
+            cachedUser.plan = usage.plan;
+            setUser(cachedUser);
+            // Trigger server sync in background
+            syncLoginWithServer(cachedUser);
           }
         }
       }
     } catch (e) {}
 
-    // 2. Listen to Firebase auth state if configured
-    let unsubscribe = () => {};
+    // 2. Listen to Firebase auth state and sync with Firestore
+    let unsubscribeAuth = () => {};
+
     if (auth) {
       try {
-        unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+        unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
           if (firebaseUser) {
             const u: SonichecksUser = {
               uid: firebaseUser.uid,
               email: firebaseUser.email,
               displayName: firebaseUser.displayName,
+              lastLoginAt: new Date().toISOString()
             };
+
+            await syncLoginWithServer(u);
             setUser(u);
+
             if (typeof window !== 'undefined') {
               localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(u));
             }
@@ -85,11 +132,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+    };
   }, []);
 
   const openAuthModal = (callback?: () => void) => {
-    // If user is already logged in, do not open modal, execute callback immediately
     if (user) {
       if (callback) callback();
       return;
@@ -107,7 +155,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthSuccessCallback(null);
   };
 
-  const triggerSuccess = (signedInUser: SonichecksUser) => {
+  const triggerSuccess = async (signedInUser: SonichecksUser) => {
+    await syncLoginWithServer(signedInUser);
     setUser(signedInUser);
     if (typeof window !== 'undefined') {
       localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(signedInUser));
@@ -127,7 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (result.user) {
-        triggerSuccess({
+        await triggerSuccess({
           uid: result.user.uid,
           email: result.user.email,
           displayName: result.user.displayName
@@ -141,14 +190,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithEmail = async (email: string, pass: string) => {
     if (!auth) {
-      // Automatic instant fallback to local email session
       await signInWithLocalEmail(email);
       return;
     }
     try {
       const result = await signInWithEmailAndPassword(auth, email, pass);
       if (result.user) {
-        triggerSuccess({
+        await triggerSuccess({
           uid: result.user.uid,
           email: result.user.email,
           displayName: result.user.displayName
@@ -162,14 +210,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUpWithEmail = async (email: string, pass: string) => {
     if (!auth) {
-      // Automatic instant fallback to local email session
       await signInWithLocalEmail(email);
       return;
     }
     try {
       const result = await createUserWithEmailAndPassword(auth, email, pass);
       if (result.user) {
-        triggerSuccess({
+        await triggerSuccess({
           uid: result.user.uid,
           email: result.user.email,
           displayName: result.user.displayName
@@ -185,9 +232,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const localUser: SonichecksUser = {
       uid: `local_${email.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
       email: email.trim().toLowerCase(),
-      displayName: email.split('@')[0]
+      displayName: email.split('@')[0],
+      lastLoginAt: new Date().toISOString()
     };
-    triggerSuccess(localUser);
+    await triggerSuccess(localUser);
+  };
+
+  const setUserPlan = async (plan: 'free' | 'pro' | 'studio') => {
+    if (user?.email) {
+      try {
+        await fetch('/api/user/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: user.email, forcePlan: plan })
+        });
+      } catch (e) {}
+      updatePlan(plan, user.email);
+      setUser((prev) => prev ? { ...prev, plan, tier: plan.toUpperCase() as any } : prev);
+    } else {
+      updatePlan(plan);
+    }
   };
 
   const logout = async () => {
@@ -195,6 +259,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(LOCAL_USER_KEY);
     }
+    resetGuestSession();
     if (auth) {
       try {
         await firebaseSignOut(auth);
@@ -214,6 +279,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signInWithEmail,
         signUpWithEmail,
         signInWithLocalEmail,
+        setUserPlan,
         logout,
         authSuccessCallback
       }}

@@ -19,10 +19,34 @@ import {
   FileSpreadsheet,
   FileDown
 } from 'lucide-react';
+import { getFaqSchema } from '@/lib/seo/structured-data';
 
 export default function LandingPage() {
+  const faqSchema = getFaqSchema([
+    {
+      question: "Is this an AI mastering tool?",
+      answer: "No. Sonichecks is NOT an AI mastering tool. It does not alter, process, or equalize your audio. It is a deterministic quality-control tool that verifies whether your exported masters comply with delivery specifications (BS.1770-4 LUFS, True Peak, Clipping, and multi-track consistency)."
+    },
+    {
+      question: "How are measurements calculated?",
+      answer: "We calculate true measurements using standard digital signal processing algorithms: ITU-R BS.1770-4 K-weighting filters for LUFS loudness, 4x polyphase sinc interpolation for True Peak (dBTP), and hard digital full-scale sample analysis for clipping."
+    },
+    {
+      question: "What happens to my uploaded audio files?",
+      answer: "Privacy is strictly guaranteed. Sonichecks processes audio 100% locally in your browser client. Zero audio files or recordings are ever uploaded to remote servers."
+    },
+    {
+      question: "What formats can I check?",
+      answer: "We support WAV (16/24/32-bit), MP3, FLAC, AIFF, AAC, M4A, and OGG files locally in the browser."
+    }
+  ]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-cyan-500/30 selection:text-cyan-200">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+      />
       {/* 1. Hero Section */}
       <section className="relative pt-20 pb-24 lg:pt-28 lg:pb-32 overflow-hidden">
         {/* Subtle grid and glow effects */}
@@ -68,8 +92,57 @@ export default function LandingPage() {
             </a>
           </div>
 
+          {/* Quick QC Delivery Target Presets */}
+          <div className="pt-6 max-w-4xl mx-auto space-y-3">
+            <div className="flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider text-cyan-400 font-mono">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Instant QC Delivery Targets (Click to Preset):</span>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2.5">
+              <Link
+                href="/check?profile=standard"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 text-xs font-bold text-slate-200 hover:text-cyan-300 transition-all hover:scale-105 shadow-md shadow-slate-950/50"
+              >
+                <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Standard Delivery</span>
+              </Link>
+
+              <Link
+                href="/check?profile=streaming"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 text-xs font-bold text-slate-200 hover:text-cyan-300 transition-all hover:scale-105 shadow-md shadow-slate-950/50"
+              >
+                <Headphones className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Streaming (Spotify / Apple Music)</span>
+              </Link>
+
+              <Link
+                href="/check?profile=broadcast_ebu"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 text-xs font-bold text-slate-200 hover:text-cyan-300 transition-all hover:scale-105 shadow-md shadow-slate-950/50"
+              >
+                <Radio className="w-3.5 h-3.5 text-blue-400" />
+                <span>Broadcast (EBU R128)</span>
+              </Link>
+
+              <Link
+                href="/check?profile=acx_audiobook"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 text-xs font-bold text-slate-200 hover:text-cyan-300 transition-all hover:scale-105 shadow-md shadow-slate-950/50"
+              >
+                <Mic className="w-3.5 h-3.5 text-amber-400" />
+                <span>Audiobook (ACX / Audible)</span>
+              </Link>
+
+              <Link
+                href="/check?profile=club_loud"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 text-xs font-bold text-slate-200 hover:text-cyan-300 transition-all hover:scale-105 shadow-md shadow-slate-950/50"
+              >
+                <Volume2 className="w-3.5 h-3.5 text-purple-400" />
+                <span>Club / DJ Master</span>
+              </Link>
+            </div>
+          </div>
+
           {/* Mini Guarantee */}
-          <div className="flex items-center justify-center gap-6 text-xs text-slate-400 pt-4">
+          <div className="flex items-center justify-center gap-6 text-xs text-slate-400 pt-4 flex-wrap">
             <span className="flex items-center gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
               WAV, AIFF, FLAC, MP3
