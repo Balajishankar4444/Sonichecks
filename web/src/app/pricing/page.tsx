@@ -20,7 +20,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 
-import { updatePlan } from '@/lib/storage';
+import { updatePlan, getUsageState, UsageState } from '@/lib/storage';
 import { useAuth } from '@/context/AuthContext';
 import { FEATURE_MATRIX_ROWS } from '@/config/tiers';
 
@@ -28,13 +28,25 @@ type Plan = 'pro' | 'studio';
 
 export default function PricingPage() {
   const { user, cancelSubscription } = useAuth();
+  const [localUsage, setLocalUsage] = useState<UsageState | null>(null);
 
   const [loadingPlan, setLoadingPlan] = useState<Plan | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelFeedback, setCancelFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [showComparison, setShowComparison] = useState(false);
 
-  const currentPlan = user?.plan || 'free';
+  React.useEffect(() => {
+    setLocalUsage(getUsageState(user?.email || undefined));
+    const handleUpdate = () => setLocalUsage(getUsageState(user?.email || undefined));
+    window.addEventListener('sonichecks_plan_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('sonichecks_plan_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, [user]);
+
+  const currentPlan = user?.plan || localUsage?.plan || 'free';
   const isCancelled = user?.status === 'cancelled';
 
   const handleCheckout = async (plan: Plan) => {

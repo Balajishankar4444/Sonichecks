@@ -55,7 +55,8 @@ export default function CheckPage() {
 
   // User Tier and Usage State
   const [usage, setUsage] = useState<UsageState | null>(null);
-  const userTier: ProductTier = (usage?.plan?.toUpperCase() as ProductTier) || 'FREE';
+  const effectivePlan = user?.plan || usage?.plan || 'free';
+  const userTier: ProductTier = (effectivePlan.toUpperCase() as ProductTier) || 'FREE';
   const tierConfig = getTierConfig(userTier);
 
   // Feature Gate Prompt Modal
@@ -74,29 +75,39 @@ export default function CheckPage() {
   // Abort controller ref for cancellation
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
+  const refreshState = () => {
     setUsage(getUsageState(user?.email || undefined));
-    const loadedCustom = loadCustomProfiles();
-    setCustomProfiles(loadedCustom);
+    setCustomProfiles(loadCustomProfiles());
+  };
+
+  useEffect(() => {
+    refreshState();
 
     // Check URL parameters for preset profile
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const profileParam = urlParams.get('profile')?.toLowerCase();
       if (profileParam) {
+        const loadedCustom = loadCustomProfiles();
         const all = getAllProfiles(loadedCustom);
         const matched = all.find(p => p.profile_id.toLowerCase() === profileParam);
         if (matched) setSelectedProfile(matched);
       }
     }
 
+    const handlePlanUpdated = () => refreshState();
     const handleCustomProfilesUpdated = (e: any) => {
       setCustomProfiles(e.detail || loadCustomProfiles());
     };
+
+    window.addEventListener('sonichecks_plan_updated', handlePlanUpdated);
     window.addEventListener('sonichecks_custom_profiles_updated', handleCustomProfilesUpdated);
+    window.addEventListener('storage', handlePlanUpdated);
 
     return () => {
+      window.removeEventListener('sonichecks_plan_updated', handlePlanUpdated);
       window.removeEventListener('sonichecks_custom_profiles_updated', handleCustomProfilesUpdated);
+      window.removeEventListener('storage', handlePlanUpdated);
     };
   }, [user]);
 

@@ -158,7 +158,8 @@ export default function DashboardPage() {
     }
   };
 
-  const userTier: ProductTier = (usage?.plan?.toUpperCase() as ProductTier) || 'FREE';
+  const effectivePlan = user?.plan || usage?.plan || 'free';
+  const userTier: ProductTier = (effectivePlan.toUpperCase() as ProductTier) || 'FREE';
   const tierConfig = getTierConfig(userTier);
 
   const triggerGate = (featureName: string, description: string, requiredTier: ProductTier = 'PRO') => {
