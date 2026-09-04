@@ -197,7 +197,15 @@ export default function DashboardPage() {
     }
   };
 
-  const usagePercent = usage ? Math.min(100, Math.round((usage.filesChecked / tierConfig.monthlyFileLimit) * 100)) : 0;
+  const currentFilesChecked = user?.filesChecked !== undefined ? user.filesChecked : (usage?.filesChecked ?? 0);
+  const isStudio = userTier === 'STUDIO' || user?.plan === 'studio' || user?.monthlyAllowance === -1;
+  const currentMonthlyLimit = isStudio ? Infinity : (user?.monthlyAllowance ?? tierConfig.monthlyFileLimit ?? 5);
+
+  const usagePercent = isStudio 
+    ? 0 
+    : currentMonthlyLimit > 0 
+    ? Math.min(100, Math.max(0, Math.round((currentFilesChecked / currentMonthlyLimit) * 100))) 
+    : 0;
 
   if (!authLoading && !user) {
     return (
@@ -316,30 +324,30 @@ export default function DashboardPage() {
             </div>
             <div>
               <div className="text-3xl font-black text-white font-mono">
-                {user?.filesChecked ?? usage?.filesChecked ?? 0}{' '}
+                {currentFilesChecked}{' '}
                 <span className="text-sm font-normal text-slate-400">
-                  / {userTier === 'STUDIO' || user?.plan === 'studio' || user?.monthlyAllowance === -1 ? 'Unlimited' : `${user?.monthlyAllowance ?? tierConfig.monthlyFileLimit} files`}
+                  / {isStudio ? 'Unlimited' : `${currentMonthlyLimit} files`}
                 </span>
               </div>
               <div className="w-full bg-slate-800 h-2 rounded-full mt-3 overflow-hidden">
                 <div 
-                  className={`h-full transition-all duration-500 ${
-                    userTier === 'STUDIO' || user?.plan === 'studio' || user?.monthlyAllowance === -1
-                      ? 'bg-purple-400 w-full'
+                  className={`h-full transition-all duration-500 rounded-full ${
+                    isStudio
+                      ? 'bg-purple-400'
                       : usagePercent >= 100
                       ? 'bg-rose-500'
                       : usagePercent > 80
                       ? 'bg-amber-400'
                       : 'bg-cyan-400'
                   }`}
-                  style={{ width: userTier === 'STUDIO' || user?.plan === 'studio' || user?.monthlyAllowance === -1 ? '100%' : `${usagePercent}%` }}
+                  style={{ width: isStudio ? (currentFilesChecked > 0 ? '100%' : '0%') : `${usagePercent}%` }}
                 />
               </div>
             </div>
             <p className="text-[11px] text-slate-400">
-              {userTier === 'STUDIO' || user?.plan === 'studio' || user?.monthlyAllowance === -1
+              {isStudio
                 ? `Unlimited monthly checks active \u2022 Quota resets ${user?.resetDate ? new Date(user.resetDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'every 30 days'}.`
-                : `${Math.max(0, (user?.monthlyAllowance ?? tierConfig.monthlyFileLimit) - (user?.filesChecked ?? usage?.filesChecked ?? 0))} checks remaining \u2022 Quota resets ${user?.resetDate ? new Date(user.resetDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'every 30 days'}.`
+                : `${Math.max(0, currentMonthlyLimit - currentFilesChecked)} checks remaining \u2022 Quota resets ${user?.resetDate ? new Date(user.resetDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'every 30 days'}.`
               }
             </p>
           </div>

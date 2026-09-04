@@ -11,7 +11,7 @@ import {
 } from 'firebase/auth';
 import { auth, googleProvider, isFirebaseConfigured } from '@/lib/firebase';
 import { syncUserWithFirestore, updateUserPlanInFirestore } from '@/lib/user-service';
-import { getUsageState, updatePlan, resetGuestSession } from '@/lib/storage';
+import { getUsageState, updatePlan, syncUsageFilesChecked, resetGuestSession } from '@/lib/storage';
 
 export interface SonichecksUser {
   uid: string;
@@ -107,6 +107,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           u.lastLoginAt = data.lastLoginAt;
           u.registeredAt = data.registeredAt;
           updatePlan(data.plan, u.email);
+          if (typeof data.filesChecked === 'number') {
+            syncUsageFilesChecked(data.filesChecked, u.email);
+          }
           setUser({ ...u });
           if (typeof window !== 'undefined') {
             localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(u));
@@ -162,6 +165,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Direct client Firestore sync with live listener
             try {
               const { profile, unsubscribe } = await syncUserWithFirestore(u, (liveData) => {
+                if (typeof liveData.filesChecked === 'number' && u.email) {
+                  syncUsageFilesChecked(liveData.filesChecked, u.email);
+                }
                 setUser((prev) => {
                   if (!prev) return null;
                   const merged = { ...prev, ...liveData };
@@ -175,6 +181,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
               if (profile) {
                 Object.assign(u, profile);
+                if (typeof profile.filesChecked === 'number' && u.email) {
+                  syncUsageFilesChecked(profile.filesChecked, u.email);
+                }
               }
             } catch (fsErr) {
               console.warn('Direct Firestore sync error:', fsErr);

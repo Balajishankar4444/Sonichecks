@@ -57,6 +57,7 @@ export function getUsageState(email?: string): UsageState {
   const key = getUsageKey(email);
   let plan: 'free' | 'pro' | 'studio' = 'free';
   let maxMonthlyLimit = 5;
+  let savedFilesChecked: number | null = null;
 
   try {
     const raw = localStorage.getItem(key);
@@ -66,18 +67,25 @@ export function getUsageState(email?: string): UsageState {
         plan = state.plan;
         maxMonthlyLimit = plan === 'studio' ? Infinity : plan === 'pro' ? 100 : 5;
       }
+      if (typeof state.filesChecked === 'number' && state.month === currentMonth) {
+        savedFilesChecked = state.filesChecked;
+      }
     }
   } catch (e) {}
 
-  // Compute accurate files checked from user's isolated history in the current month
-  const history = getSavedHistory(email);
-  const actualFilesChecked = history
-    .filter(b => b.created_at && b.created_at.startsWith(currentMonth))
-    .reduce((acc, b) => acc + (b.summary?.total_files || b.files?.length || 1), 0);
+  let filesChecked = 0;
+  if (savedFilesChecked !== null) {
+    filesChecked = savedFilesChecked;
+  } else {
+    const history = getSavedHistory(email);
+    filesChecked = history
+      .filter(b => b.created_at && b.created_at.startsWith(currentMonth))
+      .reduce((acc, b) => acc + (b.summary?.total_files || b.files?.length || 1), 0);
+  }
 
   const usage: UsageState = {
     month: currentMonth,
-    filesChecked: actualFilesChecked,
+    filesChecked,
     maxMonthlyLimit,
     plan,
     email
@@ -95,6 +103,16 @@ export function updatePlan(plan: 'free' | 'pro' | 'studio', email?: string): Usa
   const state = getUsageState(email);
   state.plan = plan;
   state.maxMonthlyLimit = plan === 'studio' ? Infinity : plan === 'pro' ? 100 : 5;
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(getUsageKey(email), JSON.stringify(state));
+    window.dispatchEvent(new Event('sonichecks_plan_updated'));
+  }
+  return state;
+}
+
+export function syncUsageFilesChecked(count: number, email?: string): UsageState {
+  const state = getUsageState(email);
+  state.filesChecked = count;
   if (typeof window !== 'undefined') {
     localStorage.setItem(getUsageKey(email), JSON.stringify(state));
     window.dispatchEvent(new Event('sonichecks_plan_updated'));
