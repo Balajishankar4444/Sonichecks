@@ -79,11 +79,10 @@ export default function PricingPage() {
     }
   };
 
-  const handleCancel = async () => {
-    if (!confirm('Are you sure you want to cancel your subscription renewal? You will keep full access to all features until the end of your current 30-day period, after which your account will automatically switch to the Free plan.')) {
-      return;
-    }
+  const [showCancelModal, setShowCancelModal] = useState(false);
 
+  const executeCancellation = async () => {
+    setShowCancelModal(false);
     setIsCancelling(true);
     setCancelFeedback(null);
     try {
@@ -107,6 +106,10 @@ export default function PricingPage() {
     } finally {
       setIsCancelling(false);
     }
+  };
+
+  const handleCancel = () => {
+    setShowCancelModal(true);
   };
 
   const renderFeatureValue = (value: string | boolean) => {
@@ -748,6 +751,82 @@ export default function PricingPage() {
         </section>
 
       </div>
+
+      {/* Cancellation Pop-up Modal */}
+      {showCancelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div 
+            className="relative w-full max-w-md overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/95 p-6 shadow-2xl sm:p-8 backdrop-blur-xl"
+            role="dialog"
+            aria-modal="true"
+          >
+            {/* Close button */}
+            <button
+              type="button"
+              onClick={() => setShowCancelModal(false)}
+              className="absolute right-4 top-4 rounded-full p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            {/* Icon Header */}
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 mb-4">
+              <AlertCircle className="h-6 w-6" />
+            </div>
+
+            {/* Title & Description */}
+            <div className="text-center">
+              <h3 className="text-lg font-black text-white sm:text-xl">
+                Cancel Auto-Renewal?
+              </h3>
+              <p className="mt-2 text-xs leading-relaxed text-slate-400 sm:text-sm">
+                You will retain full access to all <span className="font-bold text-cyan-300 uppercase">{currentPlan}</span> features, higher file limits, and QC certificates until the end of your current 30-day billing cycle.
+              </p>
+            </div>
+
+            {/* Benefit retention points */}
+            <div className="my-5 rounded-2xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2 text-left">
+              <div className="flex items-center gap-2 text-xs text-slate-300">
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400">
+                  <Check className="h-3 w-3 stroke-[3]" />
+                </span>
+                <span>Active <span className="capitalize">{currentPlan}</span> access continues until cycle ends</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-300">
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-400">
+                  <Check className="h-3 w-3 stroke-[3]" />
+                </span>
+                <span>No further automatic charges or debits</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-300">
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-800 text-slate-400">
+                  <ShieldCheck className="h-3 w-3" />
+                </span>
+                <span>Account gracefully switches to Free plan afterwards</span>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => setShowCancelModal(false)}
+                className="w-full rounded-xl bg-cyan-400 hover:bg-cyan-300 py-3 text-xs font-black text-slate-950 shadow-lg shadow-cyan-500/20 transition cursor-pointer"
+              >
+                Keep My Subscription
+              </button>
+              <button
+                type="button"
+                onClick={executeCancellation}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 py-3 text-xs font-bold text-rose-300 transition hover:bg-rose-500/20 hover:border-rose-500/50 cursor-pointer"
+              >
+                <XCircle className="h-4 w-4 text-rose-400" />
+                Confirm Cancellation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

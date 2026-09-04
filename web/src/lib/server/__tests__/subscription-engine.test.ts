@@ -222,6 +222,11 @@ export async function runSubscriptionTimelineTests() {
     const checkRes = await recordBackendUploadEvent(email, 10, { overrideAdminDb: mockDb });
     assert(checkRes.success === true, 'User retains paid access during remaining period');
 
+    // Subsequent page reload / sync must keep cancelled status
+    const reloaded = await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+    assert(reloaded.status === 'cancelled', 'Status must stay cancelled on reload');
+    assert(reloaded.plan === 'pro', 'Plan remains Pro on reload until end date');
+
     console.log('  ✅ Test 7: Subscription cancellation & active access retention until cycle end passed');
   }
 
@@ -275,7 +280,35 @@ export async function runSubscriptionTimelineTests() {
     console.log('  ✅ Test 9: Continuous Studio plan retention across billing cycles passed');
   }
 
-  console.log('\n🎉 ALL 9 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
+  // 10. Test Cancelled Paid Subscription Transition to Free After End Date
+  {
+    const email = 'cancelled_and_expired_user@example.com';
+    const thirtyTwoDaysAgo = new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString();
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+    const usersCol = mockDb.collection('users');
+    await usersCol.doc(email).set({
+      email,
+      plan: 'studio',
+      tier: 'STUDIO',
+      status: 'cancelled',
+      subscriptionStartDate: thirtyTwoDaysAgo,
+      subscriptionEndDate: twoDaysAgo,
+      resetDate: twoDaysAgo,
+      filesChecked: 50,
+      monthlyAllowance: -1,
+      registeredAt: thirtyTwoDaysAgo
+    });
+
+    const evaluated = await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+    assert(evaluated.plan === 'free', 'Cancelled subscription after end date must transition to Free');
+    assert(evaluated.tier === 'FREE', 'Tier must transition to FREE');
+    assert(evaluated.status === 'expired', 'Status must be expired');
+    assert(evaluated.monthlyAllowance === 5, 'Allowance resets to 5 files');
+    console.log('  ✅ Test 10: Cancelled subscription cleanly transitions to Free after 30-day period ends passed');
+  }
+
+  console.log('\n🎉 ALL 10 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
 }
 
 if (typeof process !== 'undefined' && process.argv && process.argv[1]?.includes('subscription-engine.test')) {

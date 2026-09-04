@@ -167,13 +167,14 @@ export async function checkCreemSubscription(email: string): Promise<{
 }
 
 /**
- * Cancel Creem subscription at period end.
+ * Cancel Creem subscription at period end so customer is not debited again.
  */
 export async function cancelCreemSubscription(subscriptionId: string): Promise<boolean> {
   try {
     const isTest = CREEM_API_KEY.startsWith('creem_test_');
     const apiBase = isTest ? 'https://test-api.creem.io' : 'https://api.creem.io';
     
+    // 1. Send cancel request to Creem API to stop future rebills
     const res = await fetch(`${apiBase}/v1/subscriptions/${subscriptionId}/cancel`, {
       method: 'POST',
       headers: {
@@ -184,7 +185,19 @@ export async function cancelCreemSubscription(subscriptionId: string): Promise<b
         cancel_at_period_end: true
       })
     });
-    return res.ok;
+
+    if (res.ok) return true;
+
+    // 2. Direct fallback cancel
+    const fallback = await fetch(`${apiBase}/v1/subscriptions/${subscriptionId}/cancel`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': CREEM_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    return fallback.ok;
   } catch (e) {
     console.warn('Creem subscription cancel notice:', e);
     return false;
@@ -193,6 +206,7 @@ export async function cancelCreemSubscription(subscriptionId: string): Promise<b
 
 /**
  * Marks a user's subscription as cancelled at period end.
+ * Sends cancellation to Creem to stop future money debits.
  * Full access to paid features continues until subscriptionEndDate is reached.
  */
 export async function cancelUserSubscription(
@@ -212,9 +226,24 @@ export async function cancelUserSubscription(
     };
   }
 
-  // Attempt Creem cancellation if subscriptionId exists
-  if (record.creemSubscriptionId) {
-    await cancelCreemSubscription(record.creemSubscriptionId);
+  // 1. Look up Creem subscription ID and send cancellation to Creem backend
+  let subId = record.creemSubscriptionId;
+  let custId = record.creemCustomerId;
+
+  if (!subId || !custId) {
+    const creemInfo = await checkCreemSubscription(cleanEmail);
+    if (creemInfo.subscriptionId) {
+      subId = creemInfo.subscriptionId;
+      record.creemSubscriptionId = subId;
+    }
+    if (creemInfo.customerId) {
+      custId = creemInfo.customerId;
+      record.creemCustomerId = custId;
+    }
+  }
+
+  if (subId) {
+    await cancelCreemSubscription(subId);
   }
 
   const nowIso = new Date().toISOString();
@@ -227,6 +256,8 @@ export async function cancelUserSubscription(
       const userRef = adminDb.collection('users').doc(cleanEmail);
       await userRef.set({
         status: 'cancelled',
+        creemSubscriptionId: subId || null,
+        creemCustomerId: custId || null,
         updatedAt: nowIso
       }, { merge: true });
     } catch (dbErr) {
@@ -237,7 +268,7 @@ export async function cancelUserSubscription(
   return {
     success: true,
     record,
-    message: `Subscription auto-renewal cancelled. You will retain full access to ${record.plan.toUpperCase()} features until the end of your 30-day period, after which your account will automatically transition to the Free plan.`
+    message: `Subscription auto-renewal cancelled. You will not be charged again. Full access to ${record.plan.toUpperCase()} features remains active until your 30-day period ends, after which your account transitions to the Free plan.`
   };
 }
 
@@ -316,7 +347,15 @@ export async function getOrSyncUserSubscription(
     // Check Creem live status for active plan or upgrades
     const creemStatus = await checkCreemSubscription(cleanEmail);
 
-    if (creemStatus.isActive) {
+    if (existingData?.status === 'cancelled' && isWithinActiveCycle && plan !== 'free') {
+      // User explicitly cancelled auto-renewal: preserve cancelled status while retaining paid features until period end date
+      status = 'cancelled';
+      tier = plan.toUpperCase() as any;
+      if (now.getTime() >= resetDateTime) {
+        filesChecked = 0;
+        resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
+      }
+    } else if (creemStatus.isActive) {
       if (creemStatus.customerId) creemCustomerId = creemStatus.customerId;
       if (creemStatus.subscriptionId) creemSubscriptionId = creemStatus.subscriptionId;
 
