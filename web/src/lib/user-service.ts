@@ -19,18 +19,18 @@ export async function syncUserWithFirestore(
   user: { uid: string; email: string | null; displayName?: string | null },
   onPlanChanged?: (plan: 'free' | 'pro' | 'studio') => void
 ): Promise<{ plan: 'free' | 'pro' | 'studio'; unsubscribe?: Unsubscribe }> {
-  const currentMonth = new Date().toISOString().slice(0, 7);
   const nowIso = new Date().toISOString();
+  const cleanEmail = user.email ? user.email.toLowerCase().trim() : null;
+  const docId = cleanEmail || user.uid;
 
-  // If Firestore is not initialized or offline, return cached local plan
-  if (!db || !user.uid) {
+  if (!db || !docId) {
     const localUsage = getUsageState(user.email || undefined);
     if (onPlanChanged) onPlanChanged(localUsage.plan);
     return { plan: localUsage.plan };
   }
 
   try {
-    const userDocRef = doc(db, 'users', user.uid);
+    const userDocRef = doc(db, 'users', docId);
     const snap = await getDoc(userDocRef);
 
     let activePlan: 'free' | 'pro' | 'studio' = 'free';
@@ -39,17 +39,14 @@ export async function syncUserWithFirestore(
       const data = snap.data() as FirestoreUserProfile;
       activePlan = data.plan || 'free';
 
-      // Update lastLoginAt timestamp
-      await updateDoc(userDocRef, {
+      await setDoc(userDocRef, {
         lastLoginAt: nowIso,
         updatedAt: nowIso,
         email: user.email || data.email,
         displayName: user.displayName || data.displayName || null
-      }).catch(console.warn);
+      }, { merge: true }).catch(console.warn);
 
     } else {
-      // First-time user document creation in Firestore
-      // Check if user already had a paid plan in local storage or Creem
       const localUsage = getUsageState(user.email || undefined);
       activePlan = localUsage.plan !== 'free' ? localUsage.plan : 'free';
 
@@ -63,10 +60,10 @@ export async function syncUserWithFirestore(
         updatedAt: nowIso
       };
 
-      await setDoc(userDocRef, newProfile).catch(console.warn);
+      await setDoc(userDocRef, newProfile, { merge: true }).catch(console.warn);
     }
 
-    // Sync to local storage for instant offline / client-side retrieval
+    // Sync to local storage
     updatePlan(activePlan, user.email || undefined);
     if (onPlanChanged) onPlanChanged(activePlan);
 
@@ -102,14 +99,14 @@ export async function updateUserPlanInFirestore(
   email?: string
 ): Promise<void> {
   const nowIso = new Date().toISOString();
+  const cleanEmail = email ? email.toLowerCase().trim() : null;
+  const docId = cleanEmail || uid;
   
-  // 1. Update local storage & dispatch global update event
   updatePlan(plan, email);
 
-  // 2. Persist to Firestore if available
-  if (db && uid) {
+  if (db && docId) {
     try {
-      const userDocRef = doc(db, 'users', uid);
+      const userDocRef = doc(db, 'users', docId);
       await setDoc(userDocRef, {
         uid,
         plan,

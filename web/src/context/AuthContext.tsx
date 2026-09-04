@@ -150,6 +150,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               lastLoginAt: new Date().toISOString()
             };
 
+            // Direct client Firestore sync with auth token
+            syncUserWithFirestore(u).catch(console.warn);
+
             await syncLoginWithServer(u);
             setUser(u);
 
@@ -278,7 +281,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setUserPlan = async (plan: 'free' | 'pro' | 'studio') => {
+    updatePlan(plan, user?.email || undefined);
+    setUser((prev) => prev ? { ...prev, plan, tier: plan.toUpperCase() as any } : prev);
     if (user?.email) {
+      if (user.uid) {
+        updateUserPlanInFirestore(user.uid, plan, user.email).catch(console.warn);
+      }
       try {
         await fetch('/api/user/login', {
           method: 'POST',
@@ -286,10 +294,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           body: JSON.stringify({ email: user.email, forcePlan: plan })
         });
       } catch (e) {}
-      updatePlan(plan, user.email);
-      setUser((prev) => prev ? { ...prev, plan, tier: plan.toUpperCase() as any } : prev);
-    } else {
-      updatePlan(plan);
     }
   };
 
