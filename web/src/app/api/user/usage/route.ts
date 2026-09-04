@@ -32,15 +32,13 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { email, fileCount = 1, clientFilesChecked } = body;
+    const { email, fileCount = 1 } = body;
 
     if (!email) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 });
     }
 
-    const result = await recordBackendUploadEvent(email, Number(fileCount) || 1, {
-      clientFilesChecked: typeof clientFilesChecked === 'number' ? clientFilesChecked : undefined
-    });
+    const result = await recordBackendUploadEvent(email, Number(fileCount) || 1);
 
     if (!result.success) {
       return NextResponse.json(

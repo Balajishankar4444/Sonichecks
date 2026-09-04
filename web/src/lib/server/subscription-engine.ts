@@ -501,15 +501,13 @@ export async function recordBackendUploadEvent(
   fileCount: number = 1,
   options?: { 
     overrideAdminDb?: Firestore | null;
-    clientFilesChecked?: number;
   }
 ): Promise<{ success: boolean; record: UserSubscriptionRecord; error?: string }> {
   const cleanEmail = email.trim().toLowerCase();
   
   // 1. Fetch current verified state with timeline evaluation & sync
   const record = await getOrSyncUserSubscription(cleanEmail, {
-    overrideAdminDb: options?.overrideAdminDb,
-    clientFilesChecked: options?.clientFilesChecked
+    overrideAdminDb: options?.overrideAdminDb
   });
 
   // 2. Check quota (Studio plan is completely unlimited)

@@ -34,7 +34,7 @@ import TierBadgeSelector from '@/components/common/TierBadgeSelector';
 import { BatchQCResult, FileQCResult, QCProfile, QCStatus } from '@/types/qc';
 import { VERIFIED_DELIVERY_PROFILES, getProfileById, getAllProfiles } from '@/config/delivery-standards';
 import { loadCustomProfiles } from '@/lib/storage/custom-profiles';
-import { saveBatchToHistory, getUsageState, updatePlan, UsageState } from '@/lib/storage';
+import { saveBatchToHistory, getUsageState, updatePlan, syncUsageFilesChecked, UsageState } from '@/lib/storage';
 import { ProductTier, TIER_CONFIGS, getTierConfig } from '@/config/tiers';
 import { useAuth } from '@/context/AuthContext';
 import { updateUserUsageInFirestore } from '@/lib/user-service';
@@ -317,28 +317,35 @@ export default function CheckPage() {
         overall_status: overall
       };
 
+      const processedCount = localFileResults.length;
       setBatchResult(syntheticBatch);
       saveBatchToHistory(syntheticBatch, user?.email || undefined);
-      const updatedUsage = getUsageState(user?.email || undefined);
-      setUsage(updatedUsage);
 
-      // Record upload in backend database and sync user state
-      if (user?.email) {
+      // Record exact processed count in backend database and sync user state
+      if (user?.email && processedCount > 0) {
         try {
-          updateUserUsageInFirestore(user.email, updatedUsage.filesChecked).catch(console.warn);
-          await fetch('/api/user/usage', {
+          const res = await fetch('/api/user/usage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               email: user.email,
-              fileCount: localFileResults.length,
-              clientFilesChecked: updatedUsage.filesChecked
+              fileCount: processedCount
             })
           });
+          if (res.ok) {
+            const data = await res.json();
+            if (typeof data.filesChecked === 'number') {
+              updateUserUsageInFirestore(user.email, data.filesChecked).catch(console.warn);
+              syncUsageFilesChecked(data.filesChecked, user.email);
+            }
+          }
           await syncUserWithServer(user.email);
         } catch (backendErr) {
           console.warn('Backend usage record notice:', backendErr);
         }
+      } else {
+        const updatedUsage = getUsageState(user?.email || undefined);
+        setUsage(updatedUsage);
       }
     } catch (err: any) {
       if (err.name === 'AbortError' || err.message?.includes('aborted')) {
