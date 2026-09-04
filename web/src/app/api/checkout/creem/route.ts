@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const CREEM_API_KEY = process.env.CREEM_API_KEY || 'creem_test_3p3jA5JhzxAB8AEd3E8rP7';
 
-// Real product IDs from the Creem store
+// Product IDs from the Creem store (env vars in Vercel, test defaults locally)
 const CREEM_PRODUCT_IDS: Record<string, string> = {
-  pro: 'prod_403pcqlci8ftt5NDEoMgUm',      // Pro Plan (€4.99/mo)
-  studio: 'prod_5ET7sC2HVVNfakcDtgMPaL'   // Studio Plan (€14.99/mo)
+  pro: process.env.CREEM_PRODUCT_PRO || 'prod_403pcqlci8ftt5NDEoMgUm',      // Test Pro Plan
+  studio: process.env.CREEM_PRODUCT_STUDIO || 'prod_5ET7sC2HVVNfakcDtgMPaL'   // Test Studio Plan
 };
 
 export async function POST(req: NextRequest) {

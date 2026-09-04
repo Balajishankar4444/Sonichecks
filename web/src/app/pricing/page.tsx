@@ -123,31 +123,24 @@ export default function PricingPage() {
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> QC Inspection History &amp; settings</li>
               </ul>
             </div>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => handleCheckout('pro')}
-                disabled={loadingPlan === 'pro'}
-                className="w-full py-3.5 rounded-xl font-bold text-xs text-center text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 shadow-xl shadow-cyan-500/30 flex items-center justify-center gap-2 filter blur-[2px] opacity-60 pointer-events-none select-none transition-all duration-200"
-              >
-                {loadingPlan === 'pro' ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Connecting to Checkout...</span>
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="w-4 h-4" />
-                    <span>Choose Pro</span>
-                  </>
-                )}
-              </button>
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <span className="px-3 py-1 rounded-full bg-slate-950/90 border border-cyan-400/60 text-cyan-300 font-bold text-[11px] tracking-wider uppercase shadow-xl backdrop-blur-md">
-                  Soon
-                </span>
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={() => handleCheckout('pro')}
+              disabled={loadingPlan === 'pro'}
+              className="w-full py-3.5 rounded-xl font-bold text-xs text-center text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-400 hover:from-cyan-300 hover:to-blue-300 shadow-xl shadow-cyan-500/30 hover:shadow-cyan-500/50 hover:scale-[1.02] active:scale-95 transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              {loadingPlan === 'pro' ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Connecting to Checkout...</span>
+                </>
+              ) : (
+                <>
+                  <CreditCard className="w-4 h-4" />
+                  <span>Choose Pro</span>
+                </>
+              )}
+            </button>
           </div>
 
           {/* Studio */}
@@ -170,31 +163,24 @@ export default function PricingPage() {
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" /> Everything in Pro included</li>
               </ul>
             </div>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => handleCheckout('studio')}
-                disabled={loadingPlan === 'studio'}
-                className="w-full py-3.5 rounded-xl font-bold text-xs text-center text-slate-200 bg-slate-800 flex items-center justify-center gap-2 filter blur-[2px] opacity-60 pointer-events-none select-none transition-all duration-200 shadow-md"
-              >
-                {loadingPlan === 'studio' ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
-                    <span>Connecting to Checkout...</span>
-                  </>
-                ) : (
-                  <>
-                    <CreditCard className="w-4 h-4 text-cyan-400" />
-                    <span>Choose Studio</span>
-                  </>
-                )}
-              </button>
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <span className="px-3 py-1 rounded-full bg-slate-950/90 border border-slate-700 text-slate-300 font-bold text-[11px] tracking-wider uppercase shadow-xl backdrop-blur-md">
-                  Soon
-                </span>
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={() => handleCheckout('studio')}
+              disabled={loadingPlan === 'studio'}
+              className="w-full py-3.5 rounded-xl font-bold text-xs text-center text-slate-200 bg-slate-800 hover:bg-slate-700 hover:text-white hover:scale-[1.02] active:scale-95 transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-md"
+            >
+              {loadingPlan === 'studio' ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                  <span>Connecting to Checkout...</span>
+                </>
+              ) : (
+                <>
+                  <CreditCard className="w-4 h-4 text-cyan-400" />
+                  <span>Choose Studio</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
 
