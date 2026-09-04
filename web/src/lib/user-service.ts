@@ -211,3 +211,26 @@ export async function updateUserPlanInFirestore(
     }
   }
 }
+
+/**
+ * Updates a user's checked file usage in Firestore.
+ */
+export async function updateUserUsageInFirestore(
+  email: string,
+  filesChecked: number
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const cleanEmail = email.toLowerCase().trim();
+  if (db && cleanEmail) {
+    try {
+      const userDocRef = doc(db, 'users', cleanEmail);
+      await setDoc(userDocRef, {
+        filesChecked,
+        lastUploadAt: nowIso,
+        updatedAt: nowIso
+      }, { merge: true });
+    } catch (e) {
+      console.warn('Failed to update usage in Firestore:', e);
+    }
+  }
+}

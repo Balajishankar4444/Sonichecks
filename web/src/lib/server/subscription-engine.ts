@@ -399,10 +399,13 @@ export async function getOrSyncUserSubscription(
           filesChecked = 0;
         } else {
           // Explicit manual test date set to the past in Firestore: transition to expired Free
+          const isFirstTransition = existingData?.plan !== 'free' && existingData?.status !== 'expired';
           plan = 'free';
           tier = 'FREE';
           status = 'expired';
-          filesChecked = 0;
+          if (isFirstTransition) {
+            filesChecked = 0;
+          }
         }
       } else {
         // Within active cycle
@@ -430,12 +433,15 @@ export async function getOrSyncUserSubscription(
           filesChecked = 0;
           resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
         }
-      } else if (plan !== 'free') {
+      } else if (plan !== 'free' || status === 'expired') {
         // SUBSCRIPTION STOPPED / EXPIRED: Automatically transition to Free plan
+        const isFirstTransition = existingData?.plan !== 'free' && existingData?.status !== 'expired';
         plan = 'free';
         tier = 'FREE';
         status = 'expired';
-        filesChecked = 0;
+        if (isFirstTransition) {
+          filesChecked = 0;
+        }
       } else {
         // FREE PLAN: 30-day rolling quota reset
         if (now.getTime() >= resetDateTime) {

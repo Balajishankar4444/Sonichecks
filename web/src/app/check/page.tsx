@@ -37,6 +37,7 @@ import { loadCustomProfiles } from '@/lib/storage/custom-profiles';
 import { saveBatchToHistory, getUsageState, updatePlan, UsageState } from '@/lib/storage';
 import { ProductTier, TIER_CONFIGS, getTierConfig } from '@/config/tiers';
 import { useAuth } from '@/context/AuthContext';
+import { updateUserUsageInFirestore } from '@/lib/user-service';
 import { analyzeAudioFileLocally } from '@/lib/audio-engine/client';
 import { convertLocalMeasurementsToFileQCResult } from '@/lib/audio-engine/adapter';
 
@@ -324,6 +325,7 @@ export default function CheckPage() {
       // Record upload in backend database and sync user state
       if (user?.email) {
         try {
+          updateUserUsageInFirestore(user.email, updatedUsage.filesChecked).catch(console.warn);
           await fetch('/api/user/usage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

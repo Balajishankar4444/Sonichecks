@@ -393,7 +393,47 @@ export async function runSubscriptionTimelineTests() {
     console.log('  ✅ Test 13: Creem customer manual expiration testing passed');
   }
 
-  console.log('\n🎉 ALL 13 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
+  // 14. Test Free/Expired User Quota Usage Accumulation & Hard Gating
+  {
+    const email = 'free_quota_accumulation@example.com';
+    const futureReset = new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString();
+
+    const usersCol = mockDb.collection('users');
+    await usersCol.doc(email).set({
+      email,
+      plan: 'free',
+      tier: 'FREE',
+      status: 'expired',
+      subscriptionStartDate: new Date().toISOString(),
+      subscriptionEndDate: new Date().toISOString(),
+      resetDate: futureReset,
+      filesChecked: 0,
+      monthlyAllowance: 5,
+      registeredAt: new Date().toISOString()
+    });
+
+    // 1st Upload
+    const up1 = await recordBackendUploadEvent(email, 1, { overrideAdminDb: mockDb });
+    assert(up1.success === true, '1st upload must succeed');
+    assert(up1.record.filesChecked === 1, 'filesChecked should be 1');
+
+    // Page reload / evaluation should NOT reset filesChecked back to 0!
+    const reloaded = await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+    assert(reloaded.filesChecked === 1, `filesChecked must stay 1 across reloads, got ${reloaded.filesChecked}`);
+
+    // Upload 4 more files to reach limit of 5
+    const up4 = await recordBackendUploadEvent(email, 4, { overrideAdminDb: mockDb });
+    assert(up4.success === true, 'Uploads up to 5 must succeed');
+    assert(up4.record.filesChecked === 5, 'filesChecked should be 5');
+
+    // 6th Upload must be BLOCKED
+    const up6 = await recordBackendUploadEvent(email, 1, { overrideAdminDb: mockDb });
+    assert(up6.success === false, '6th upload on Free plan must be blocked');
+    assert(!!up6.error && up6.error.includes('Monthly quota exceeded'), 'Must return quota exceeded error');
+    console.log('  ✅ Test 14: Free/Expired user file usage accumulation & hard gating passed');
+  }
+
+  console.log('\n🎉 ALL 14 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
 }
 
 if (typeof process !== 'undefined' && process.argv && process.argv[1]?.includes('subscription-engine.test')) {
