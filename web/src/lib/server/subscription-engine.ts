@@ -35,14 +35,17 @@ const CREEM_PRODUCT_STUDIO = process.env.CREEM_PRODUCT_STUDIO || 'prod_5ET7sC2HV
  */
 export function determineCreemPlan(item: any): 'studio' | 'pro' {
   if (!item) return 'pro';
+  const str = JSON.stringify(item).toLowerCase();
   const prodId = String(item.product_id || item.productId || item.product || item.product_tier || '').toLowerCase();
   const prodName = String(item.product_name || item.name || item.description || item.title || item.plan || '').toLowerCase();
-  const amount = Number(item.amount || item.price || item.unit_amount || item.total_amount || 0);
+  const amount = Number(item.amount || item.price || item.unit_amount || item.total_amount || item.total || 0);
 
   if (
     prodId === CREEM_PRODUCT_STUDIO.toLowerCase() ||
     prodId.includes('studio') ||
     prodName.includes('studio') ||
+    str.includes(CREEM_PRODUCT_STUDIO.toLowerCase()) ||
+    str.includes('studio') ||
     amount >= 1400 // €14.99 in cents
   ) {
     return 'studio';
@@ -64,7 +67,7 @@ export function getPlanAllowance(plan: 'free' | 'pro' | 'studio'): number {
 }
 
 /**
- * Check Creem API to determine if a customer has an active paid subscription.
+ * Check Creem API across checkouts, subscriptions, and customers to verify active paid status.
  */
 export async function checkCreemSubscription(email: string): Promise<{
   isActive: boolean;
@@ -80,8 +83,26 @@ export async function checkCreemSubscription(email: string): Promise<{
     
     let activeCustomer: any = null;
     let activeSubscription: any = null;
+    let activeCheckout: any = null;
 
-    // 1. Query subscriptions endpoint
+    // 1. Query checkouts endpoint
+    try {
+      const chkRes = await fetch(`${apiBase}/v1/checkouts?email=${encodeURIComponent(cleanEmail)}`, {
+        headers: { 'x-api-key': CREEM_API_KEY }
+      });
+      if (chkRes.ok) {
+        const chkData = await chkRes.json();
+        const chks = Array.isArray(chkData) ? chkData : (chkData?.items || chkData?.data || (chkData?.id ? [chkData] : []));
+        if (chks.length > 0) {
+          const studioChk = chks.find((c: any) => determineCreemPlan(c) === 'studio');
+          activeCheckout = studioChk || chks[0];
+        }
+      }
+    } catch (chkErr) {
+      console.warn('Creem checkouts lookup notice:', chkErr);
+    }
+
+    // 2. Query subscriptions endpoint
     try {
       const subRes = await fetch(`${apiBase}/v1/subscriptions?email=${encodeURIComponent(cleanEmail)}`, {
         headers: { 'x-api-key': CREEM_API_KEY }
@@ -90,7 +111,6 @@ export async function checkCreemSubscription(email: string): Promise<{
         const subData = await subRes.json();
         const subs = Array.isArray(subData) ? subData : (subData?.items || subData?.data || (subData?.id ? [subData] : []));
         if (subs.length > 0) {
-          // Prioritize active Studio subscription first
           const studioSub = subs.find((s: any) => determineCreemPlan(s) === 'studio' && s.status !== 'canceled' && s.status !== 'expired');
           const validSub = studioSub || subs.find((s: any) => s.status !== 'canceled' && s.status !== 'expired') || subs[0];
           if (validSub) {
@@ -102,7 +122,7 @@ export async function checkCreemSubscription(email: string): Promise<{
       console.warn('Creem subscription lookup notice:', subErr);
     }
 
-    // 2. Query customers endpoint
+    // 3. Query customers endpoint
     try {
       const res = await fetch(`${apiBase}/v1/customers?email=${encodeURIComponent(cleanEmail)}`, {
         headers: { 'x-api-key': CREEM_API_KEY }
@@ -119,12 +139,14 @@ export async function checkCreemSubscription(email: string): Promise<{
       console.warn('Creem customer lookup notice:', custErr);
     }
 
-    const matchedRecord = activeSubscription || activeCustomer;
+    const matchedRecord = activeSubscription || activeCheckout || activeCustomer;
     if (matchedRecord) {
       let plan = determineCreemPlan(matchedRecord);
-      if (activeSubscription && determineCreemPlan(activeSubscription) === 'studio') {
-        plan = 'studio';
-      } else if (activeCustomer && determineCreemPlan(activeCustomer) === 'studio') {
+      if (
+        (activeCheckout && determineCreemPlan(activeCheckout) === 'studio') ||
+        (activeSubscription && determineCreemPlan(activeSubscription) === 'studio') ||
+        (activeCustomer && determineCreemPlan(activeCustomer) === 'studio')
+      ) {
         plan = 'studio';
       }
 

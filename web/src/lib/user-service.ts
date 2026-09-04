@@ -33,13 +33,22 @@ export async function syncUserWithFirestore(
     const userDocRef = doc(db, 'users', docId);
     const snap = await getDoc(userDocRef);
 
+    const localUsage = getUsageState(user.email || undefined);
     let activePlan: 'free' | 'pro' | 'studio' = 'free';
 
     if (snap.exists()) {
       const data = snap.data() as FirestoreUserProfile;
-      activePlan = data.plan || 'free';
+      // Elevate to Studio if either Firestore or local state has Studio
+      if (localUsage.plan === 'studio' || data.plan === 'studio') {
+        activePlan = 'studio';
+      } else if (localUsage.plan === 'pro' || data.plan === 'pro') {
+        activePlan = 'pro';
+      } else {
+        activePlan = data.plan || 'free';
+      }
 
       await setDoc(userDocRef, {
+        plan: activePlan,
         lastLoginAt: nowIso,
         updatedAt: nowIso,
         email: user.email || data.email,
@@ -47,7 +56,6 @@ export async function syncUserWithFirestore(
       }, { merge: true }).catch(console.warn);
 
     } else {
-      const localUsage = getUsageState(user.email || undefined);
       activePlan = localUsage.plan !== 'free' ? localUsage.plan : 'free';
 
       const newProfile: FirestoreUserProfile = {
