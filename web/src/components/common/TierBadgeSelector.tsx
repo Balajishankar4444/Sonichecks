@@ -29,7 +29,9 @@ export default function TierBadgeSelector() {
         }`}>
           {config.name}
         </span>
-        <span className="text-slate-500 font-mono">({usage.filesChecked}/{config.monthlyFileLimit})</span>
+        <span className="text-slate-500 font-mono">
+          ({user?.filesChecked ?? usage.filesChecked}/{currentTier === 'STUDIO' ? 'Unlimited' : config.monthlyFileLimit})
+        </span>
       </div>
 
       {currentTier === 'FREE' ? (

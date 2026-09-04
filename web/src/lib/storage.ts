@@ -64,7 +64,7 @@ export function getUsageState(email?: string): UsageState {
       const state: UsageState = JSON.parse(raw);
       if (state.plan) {
         plan = state.plan;
-        maxMonthlyLimit = plan === 'studio' ? 500 : plan === 'pro' ? 100 : 5;
+        maxMonthlyLimit = plan === 'studio' ? Infinity : plan === 'pro' ? 100 : 5;
       }
     }
   } catch (e) {}
@@ -94,7 +94,7 @@ export function getUsageState(email?: string): UsageState {
 export function updatePlan(plan: 'free' | 'pro' | 'studio', email?: string): UsageState {
   const state = getUsageState(email);
   state.plan = plan;
-  state.maxMonthlyLimit = plan === 'studio' ? 500 : plan === 'pro' ? 100 : 5;
+  state.maxMonthlyLimit = plan === 'studio' ? Infinity : plan === 'pro' ? 100 : 5;
   if (typeof window !== 'undefined') {
     localStorage.setItem(getUsageKey(email), JSON.stringify(state));
     window.dispatchEvent(new Event('sonichecks_plan_updated'));

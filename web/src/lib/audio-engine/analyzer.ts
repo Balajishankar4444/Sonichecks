@@ -47,13 +47,16 @@ export async function analyzeWavBuffer(
     // Loudness
     integratedLufs: loudness.integratedLufs,
     momentaryMaxLufs: loudness.momentaryMaxLufs,
+    momentaryMaxTimestampSec: loudness.momentaryMaxTimestampSec,
     shortTermMaxLufs: loudness.shortTermMaxLufs,
+    shortTermMaxTimestampSec: loudness.shortTermMaxTimestampSec,
     loudnessRangeLu: loudness.loudnessRangeLu,
     // Peaks & True Peak
     samplePeakLinear: metrics.samplePeakLinear,
     samplePeakDbfs: metrics.samplePeakDbfs,
     truePeakLinear: truePeak.truePeakLinear,
     truePeakDbtp: truePeak.truePeakDbtp,
+    truePeakTimestampSec: truePeak.truePeakTimestampSec,
     isClippingRisk: truePeak.isClippingRisk || metrics.samplePeakDbfs >= -0.05,
     // RMS & DC
     rmsLinear: metrics.rmsLinear,
@@ -63,6 +66,7 @@ export async function analyzeWavBuffer(
     channelMetrics: metrics.channelMetrics,
     clipping: metrics.clipping,
     silence: metrics.silence,
+    waveformEnvelope: metrics.waveformEnvelope,
     analysisDurationMs: totalDurationMs
   };
 }

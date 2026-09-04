@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const CREEM_API_KEY = process.env.CREEM_API_KEY || 'creem_test_3p3jA5JhzxAB8AEd3E8rP7';
+import { getOrSyncUserSubscription, checkCreemSubscription } from '@/lib/server/subscription-engine';
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,41 +11,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Email parameter is required' }, { status: 400 });
     }
 
-    const isTest = CREEM_API_KEY.startsWith('creem_test_');
-    const apiBase = isTest ? 'https://test-api.creem.io' : 'https://api.creem.io';
+    const forcePlan = (planParam === 'pro' || planParam === 'studio') ? planParam : undefined;
 
-    let creemCustomer = null;
-    let resolvedPlan: 'pro' | 'studio' | 'free' = 'free';
-
-    // 1. Query Creem API for customer with this email
-    try {
-      const creemRes = await fetch(`${apiBase}/v1/customers?email=${encodeURIComponent(email)}`, {
-        headers: { 'x-api-key': CREEM_API_KEY }
-      });
-
-      if (creemRes.ok) {
-        creemCustomer = await creemRes.json();
-        // If customer exists on Creem, they have an active paid account
-        if (creemCustomer && creemCustomer.id) {
-          resolvedPlan = (planParam === 'studio' ? 'studio' : 'pro');
-        }
-      }
-    } catch (apiErr) {
-      console.warn('Creem customer lookup notice:', apiErr);
-    }
-
-    // 2. If planParam was explicitly passed
-    if (planParam === 'pro' || planParam === 'studio') {
-      resolvedPlan = planParam;
-    }
+    const record = await getOrSyncUserSubscription(email, {
+      forcePlan
+    });
 
     return NextResponse.json({
       success: true,
-      email,
-      plan: resolvedPlan,
-      isPaid: resolvedPlan !== 'free',
-      customer: creemCustomer,
-      timestamp: new Date().toISOString()
+      ...record
     });
 
   } catch (error: any) {
@@ -67,11 +40,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 });
     }
 
+    const validPlan = plan === 'studio' ? 'studio' : 'pro';
+
+    const record = await getOrSyncUserSubscription(email, {
+      forcePlan: validPlan
+    });
+
     return NextResponse.json({
       success: true,
-      email,
-      plan: plan === 'studio' ? 'studio' : 'pro',
-      status: 'active'
+      ...record
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -35,13 +35,16 @@ export interface LocalAudioMeasurements {
   // Loudness (ITU-R BS.1770-4)
   integratedLufs: number;
   momentaryMaxLufs: number | null;
+  momentaryMaxTimestampSec?: number | null;
   shortTermMaxLufs: number | null;
+  shortTermMaxTimestampSec?: number | null;
   loudnessRangeLu: number | null;
   // Peaks & True Peak (4x Oversampled)
   samplePeakLinear: number;
   samplePeakDbfs: number;
   truePeakLinear: number;
   truePeakDbtp: number;
+  truePeakTimestampSec?: number | null;
   isClippingRisk: boolean;
   // RMS & DC Offset
   rmsLinear: number;
@@ -55,6 +58,7 @@ export interface LocalAudioMeasurements {
     clippedSamples: number;
     consecutiveClippedRuns: number;
     maxConsecutiveClipped: number;
+    clippingTimestampsSec?: number[];
   };
   // Silence
   silence: {
@@ -64,6 +68,7 @@ export interface LocalAudioMeasurements {
     isCompletelySilent: boolean;
     excessiveSilenceDetected: boolean;
   };
+  waveformEnvelope?: number[];
   analysisDurationMs: number;
 }
 

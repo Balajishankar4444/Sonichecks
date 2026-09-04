@@ -4,6 +4,8 @@ export function generateCsvString(batchResult: BatchQCResult): string {
   const headers = [
     'Filename',
     'QC Status',
+    'Delivery Profile',
+    'Profile Version',
     'Format',
     'Sample Rate (Hz)',
     'Bit Depth',
@@ -27,11 +29,15 @@ export function generateCsvString(batchResult: BatchQCResult): string {
 
   for (const f of batchResult.files) {
     const fixes = f.fix_summary ? f.fix_summary.join('; ') : 'None';
+    const profileName = f.profile_name || batchResult.profile_name || 'Standard Delivery';
+    const profileVersion = f.profile_version || batchResult.profile_version || '2.0';
 
     if (f.file_info) {
       rows.push([
         escapeCsv(f.filename),
         f.overall_status,
+        escapeCsv(profileName),
+        escapeCsv(profileVersion),
         f.file_info.format || 'WAV',
         String(f.file_info.sample_rate || 'N/A'),
         f.file_info.bit_depth ? `${f.file_info.bit_depth}-bit` : 'N/A',
@@ -54,6 +60,8 @@ export function generateCsvString(batchResult: BatchQCResult): string {
       rows.push([
         escapeCsv(f.filename),
         f.overall_status,
+        escapeCsv(profileName),
+        escapeCsv(profileVersion),
         'Unknown',
         'N/A',
         'N/A',

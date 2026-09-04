@@ -13,6 +13,7 @@ export interface CalculatedDspMetrics {
     clippedSamples: number;
     consecutiveClippedRuns: number;
     maxConsecutiveClipped: number;
+    clippingTimestampsSec?: number[];
   };
   silence: {
     leadingSilenceSec: number;
@@ -21,6 +22,7 @@ export interface CalculatedDspMetrics {
     isCompletelySilent: boolean;
     excessiveSilenceDetected: boolean;
   };
+  waveformEnvelope?: number[];
 }
 
 export function linearToDbfs(linear: number, floorDb: number = -100.0): number {
@@ -49,7 +51,8 @@ export function calculateDspMetrics(
         clippingDetected: false,
         clippedSamples: 0,
         consecutiveClippedRuns: 0,
-        maxConsecutiveClipped: 0
+        maxConsecutiveClipped: 0,
+        clippingTimestampsSec: []
       },
       silence: {
         leadingSilenceSec: 0.0,
@@ -57,7 +60,8 @@ export function calculateDspMetrics(
         totalSilenceSec: 0.0,
         isCompletelySilent: true,
         excessiveSilenceDetected: true
-      }
+      },
+      waveformEnvelope: []
     };
   }
 
@@ -70,6 +74,7 @@ export function calculateDspMetrics(
   let totalClippedSamples = 0;
   let totalClippedRuns = 0;
   let maxConsecutiveClipped = 0;
+  const clippingTimestamps: number[] = [];
 
   const clipThreshold = 0.9999;
   const minClipRun = 3;
@@ -82,6 +87,7 @@ export function calculateDspMetrics(
     let chClippedSamples = 0;
     let currentClipRun = 0;
     let chClippedRuns = 0;
+    let runStartIdx = 0;
 
     for (let i = 0; i < numSamples; i++) {
       const sample = data[i];
@@ -98,6 +104,7 @@ export function calculateDspMetrics(
 
       // Clipping
       if (absSample >= clipThreshold) {
+        if (currentClipRun === 0) runStartIdx = i;
         chClippedSamples++;
         currentClipRun++;
         if (currentClipRun > maxConsecutiveClipped) {
@@ -106,6 +113,10 @@ export function calculateDspMetrics(
       } else {
         if (currentClipRun >= minClipRun) {
           chClippedRuns++;
+          const tSec = Math.round((runStartIdx / sampleRate) * 1000) / 1000;
+          if (clippingTimestamps.length < 15 && !clippingTimestamps.some(t => Math.abs(t - tSec) < 0.2)) {
+            clippingTimestamps.push(tSec);
+          }
         }
         currentClipRun = 0;
       }
@@ -113,6 +124,10 @@ export function calculateDspMetrics(
 
     if (currentClipRun >= minClipRun) {
       chClippedRuns++;
+      const tSec = Math.round((runStartIdx / sampleRate) * 1000) / 1000;
+      if (clippingTimestamps.length < 15 && !clippingTimestamps.some(t => Math.abs(t - tSec) < 0.2)) {
+        clippingTimestamps.push(tSec);
+      }
     }
 
     if (chPeakLinear > globalPeakLinear) {
@@ -143,6 +158,26 @@ export function calculateDspMetrics(
   const globalDcOffset = totalSumOfSamples / (numSamples * numChannels);
 
   const clippingDetected = totalClippedRuns > 0 || totalClippedSamples >= 10;
+
+  // Waveform Downsampled Envelope Generation (100 peak buckets)
+  const numBuckets = 100;
+  const bucketSize = Math.max(1, Math.floor(numSamples / numBuckets));
+  const waveformEnvelope: number[] = [];
+
+  for (let b = 0; b < numBuckets; b++) {
+    const start = b * bucketSize;
+    const end = Math.min(start + bucketSize, numSamples);
+    let bucketMax = 0.0;
+
+    for (let ch = 0; ch < numChannels; ch++) {
+      const data = channels[ch];
+      for (let i = start; i < end; i += 4) { // stride of 4 for speed
+        const v = Math.abs(data[i]);
+        if (v > bucketMax) bucketMax = v;
+      }
+    }
+    waveformEnvelope.push(Math.round(bucketMax * 1000) / 1000);
+  }
 
   // Silence Detection (50ms RMS frames with -60 dBFS threshold)
   const windowMs = 50.0;
@@ -196,13 +231,14 @@ export function calculateDspMetrics(
       const lastActiveFrame = nonSilentFrames[nonSilentFrames.length - 1];
 
       leadingSilenceSec = Math.round(((firstActiveFrame * frameSize) / sampleRate) * 1000) / 1000;
-      trailingSilenceSec = Math.round((((numFrames - 1 - lastActiveFrame) * frameSize + (numSamples % frameSize)) / sampleRate) * 1000) / 1000;
-      
-      const silentFramesCount = numFrames - nonSilentFrames.length;
-      totalSilenceSec = Math.round(((silentFramesCount * frameSize) / sampleRate) * 1000) / 1000;
+      trailingSilenceSec = Math.round((((numFrames - 1 - lastActiveFrame) * frameSize) / sampleRate) * 1000) / 1000;
 
-      const silencePercentage = durationSeconds > 0 ? (totalSilenceSec / durationSeconds) * 100.0 : 0;
-      excessiveSilenceDetected = leadingSilenceSec > 2.0 || trailingSilenceSec > 5.0 || (silencePercentage > 45.0 && durationSeconds > 10.0);
+      const silentFrameCount = numFrames - nonSilentFrames.length;
+      totalSilenceSec = Math.round(((silentFrameCount * frameSize) / sampleRate) * 1000) / 1000;
+
+      if (leadingSilenceSec > 3.0 || trailingSilenceSec > 5.0) {
+        excessiveSilenceDetected = true;
+      }
     }
   }
 
@@ -218,7 +254,8 @@ export function calculateDspMetrics(
       clippingDetected,
       clippedSamples: totalClippedSamples,
       consecutiveClippedRuns: totalClippedRuns,
-      maxConsecutiveClipped
+      maxConsecutiveClipped,
+      clippingTimestampsSec: clippingTimestamps
     },
     silence: {
       leadingSilenceSec,
@@ -226,6 +263,7 @@ export function calculateDspMetrics(
       totalSilenceSec,
       isCompletelySilent,
       excessiveSilenceDetected
-    }
+    },
+    waveformEnvelope
   };
 }

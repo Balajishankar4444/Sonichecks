@@ -17,13 +17,16 @@ export interface AudioFileInfo {
 export interface LoudnessResult {
   integrated_lufs?: number | null;
   short_term_max_lufs?: number | null;
+  short_term_max_timestamp_sec?: number | null;
   momentary_max_lufs?: number | null;
+  momentary_max_timestamp_sec?: number | null;
   loudness_range_lu?: number | null;
 }
 
 export interface PeakResult {
   sample_peak_dbfs: number;
   true_peak_dbtp: number;
+  true_peak_timestamp_sec?: number | null;
   sample_peak_linear: number;
   true_peak_linear: number;
   is_clipping_risk: boolean;
@@ -34,6 +37,7 @@ export interface ClippingResult {
   clipped_samples: number;
   consecutive_clipped_runs: number;
   max_consecutive_clipped: number;
+  clipping_timestamps_sec?: number[];
 }
 
 export interface SilenceResult {
@@ -45,12 +49,18 @@ export interface SilenceResult {
 }
 
 export interface QCRuleCheck {
+  id?: string;
   name: string;
+  category?: 'LOUDNESS' | 'PEAK' | 'CLIPPING' | 'FORMAT' | 'SILENCE' | 'DYNAMIC';
   status: QCStatus;
   value: any;
   limit: any;
   unit?: string | null;
+  timestamp_sec?: number | null;
   message: string;
+  what?: string;
+  why?: string;
+  how?: string;
   fix_recommendation?: string | null;
 }
 
@@ -66,6 +76,10 @@ export interface FileQCResult {
   overall_status: QCStatus;
   fix_summary: string[];
   error_message?: string | null;
+  waveform_peaks?: number[];
+  profile_id?: string;
+  profile_name?: string;
+  profile_version?: string;
 }
 
 export interface ConsistencyIssue {
@@ -95,6 +109,7 @@ export interface BatchQCResult {
   created_at: string;
   profile_id: string;
   profile_name: string;
+  profile_version?: string;
   files: FileQCResult[];
   consistency_issues: ConsistencyIssue[];
   summary: BatchSummary;
@@ -116,12 +131,21 @@ export interface QCProfileRules {
   max_trailing_silence_sec?: number | null;
   min_trailing_silence_sec?: number | null;
   max_total_silence_percent?: number | null;
+  max_lra_lu?: number | null;
+  min_lra_lu?: number | null;
+  max_momentary_lufs?: number | null;
+  max_short_term_lufs?: number | null;
 }
 
 export interface QCProfile {
   profile_id: string;
   name: string;
+  platform: string;
+  category: 'Music' | 'Podcast' | 'Audiobook' | 'Broadcast' | 'Film / TV' | 'YouTube / Video' | 'Voiceover' | 'Club / DJ' | 'General' | 'Custom';
+  version: string;
   description: string;
-  category: string;
+  source_reference: string;
+  last_verified_date: string;
   rules: QCProfileRules;
+  is_custom?: boolean;
 }

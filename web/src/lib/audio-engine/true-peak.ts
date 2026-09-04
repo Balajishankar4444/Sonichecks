@@ -6,6 +6,7 @@
 export interface TruePeakMeasurements {
   truePeakLinear: number;
   truePeakDbtp: number;
+  truePeakTimestampSec?: number | null;
   isClippingRisk: boolean;
 }
 
@@ -73,7 +74,6 @@ const POLYPHASE_2X = createPolyphaseSincFilter(2, 12);
 
 /**
  * Calculate True Peak (dBTP) using 4x oversampled polyphase FIR interpolation.
- * Processed in streaming chunks of 100,000 samples to maintain low memory footprint on huge files.
  */
 export function calculateTruePeak(
   channels: Float32Array[],
@@ -84,6 +84,7 @@ export function calculateTruePeak(
     return {
       truePeakLinear: 0.0,
       truePeakDbtp: -100.0,
+      truePeakTimestampSec: null,
       isClippingRisk: false
     };
   }
@@ -97,6 +98,7 @@ export function calculateTruePeak(
   }
 
   let globalMaxTruePeak = 0.0;
+  let maxTruePeakSampleIdx = 0;
 
   if (upFactor === 1) {
     // 1x: direct peak
@@ -104,7 +106,10 @@ export function calculateTruePeak(
       const data = channels[ch];
       for (let i = 0; i < numSamples; i++) {
         const absVal = Math.abs(data[i]);
-        if (absVal > globalMaxTruePeak) globalMaxTruePeak = absVal;
+        if (absVal > globalMaxTruePeak) {
+          globalMaxTruePeak = absVal;
+          maxTruePeakSampleIdx = i;
+        }
       }
     }
   } else {
@@ -120,6 +125,7 @@ export function calculateTruePeak(
         const absOriginal = Math.abs(data[i]);
         if (absOriginal > globalMaxTruePeak) {
           globalMaxTruePeak = absOriginal;
+          maxTruePeakSampleIdx = i;
         }
 
         // Only interpolate if local region could realistically exceed current peak
@@ -146,6 +152,7 @@ export function calculateTruePeak(
           const absInterp = Math.abs(interpVal);
           if (absInterp > globalMaxTruePeak) {
             globalMaxTruePeak = absInterp;
+            maxTruePeakSampleIdx = i;
           }
         }
       }
@@ -158,10 +165,12 @@ export function calculateTruePeak(
     : -100.0;
 
   const isClippingRisk = truePeakDbtp >= -0.1;
+  const truePeakTimestampSec = Math.round((maxTruePeakSampleIdx / sampleRate) * 1000) / 1000;
 
   return {
     truePeakLinear,
     truePeakDbtp,
+    truePeakTimestampSec,
     isClippingRisk
   };
 }

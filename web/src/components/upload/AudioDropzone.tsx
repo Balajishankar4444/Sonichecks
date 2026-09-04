@@ -8,12 +8,15 @@ interface AudioDropzoneProps {
   onFilesSelected: (files: File[]) => void;
   disabled?: boolean;
   currentCount?: number;
+  maxBatchSize?: number;
 }
 
-export default function AudioDropzone({ onFilesSelected, disabled, currentCount = 0 }: AudioDropzoneProps) {
+export default function AudioDropzone({ onFilesSelected, disabled, currentCount = 0, maxBatchSize = MAX_BATCH_SIZE }: AudioDropzoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const effectiveMaxBatch = maxBatchSize;
 
   const validateAndAddFiles = (incomingList: FileList | File[]) => {
     setErrorMsg(null);
@@ -21,16 +24,16 @@ export default function AudioDropzone({ onFilesSelected, disabled, currentCount 
     const invalidNames: string[] = [];
 
     const incomingArray = Array.from(incomingList);
-    const remainingSlots = MAX_BATCH_SIZE - currentCount;
+    const remainingSlots = effectiveMaxBatch - currentCount;
 
     if (remainingSlots <= 0) {
-      setErrorMsg(`Batch limit of ${MAX_BATCH_SIZE} files reached. Please remove files or analyze the current batch.`);
+      setErrorMsg(`Batch limit of ${effectiveMaxBatch} files reached. Please remove files or analyze the current batch.`);
       return;
     }
 
     const filesToConsider = incomingArray.slice(0, remainingSlots);
     if (incomingArray.length > remainingSlots) {
-      setErrorMsg(`Maximum ${MAX_BATCH_SIZE} files per batch. Added ${remainingSlots} files, skipped ${incomingArray.length - remainingSlots}.`);
+      setErrorMsg(`Maximum ${effectiveMaxBatch} files per batch. Added ${remainingSlots} files, skipped ${incomingArray.length - remainingSlots}.`);
     }
 
     filesToConsider.forEach((file) => {
@@ -130,7 +133,7 @@ export default function AudioDropzone({ onFilesSelected, disabled, currentCount 
               </span>
             ))}
             <span className="text-xs text-slate-400 self-center pl-1">
-              up to {MAX_FILE_SIZE_MB}MB per file &bull; up to {MAX_BATCH_SIZE} files per batch
+              up to {MAX_FILE_SIZE_MB}MB per file &bull; up to {effectiveMaxBatch} files per batch
             </span>
           </div>
         </div>

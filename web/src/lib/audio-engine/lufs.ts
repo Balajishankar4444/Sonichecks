@@ -17,7 +17,9 @@ export interface BiquadCoeffs {
 export interface LoudnessMeasurements {
   integratedLufs: number;
   momentaryMaxLufs: number | null;
+  momentaryMaxTimestampSec?: number | null;
   shortTermMaxLufs: number | null;
+  shortTermMaxTimestampSec?: number | null;
   loudnessRangeLu: number | null;
   shortTermTimeline?: ShortTermPoint[];
 }
@@ -288,9 +290,11 @@ export function calculateLoudness(
 
   // 7. Momentary Max LUFS (Maximum of 400ms blocks)
   let momentaryMax = -70.0;
+  let momentaryMaxTime: number | null = null;
   for (let j = 0; j < numBlocks; j++) {
     if (blockLoudness[j] > momentaryMax) {
       momentaryMax = blockLoudness[j];
+      momentaryMaxTime = Tg * (j * step);
     }
   }
   const momentaryMaxLufs = Math.max(-70.0, Math.round(momentaryMax * 100) / 100);
@@ -301,7 +305,9 @@ export function calculateLoudness(
   return {
     integratedLufs,
     momentaryMaxLufs,
+    momentaryMaxTimestampSec: momentaryMaxTime,
     shortTermMaxLufs: lraMetrics.shortTermMaxLufs,
+    shortTermMaxTimestampSec: lraMetrics.shortTermMaxTimestampSec,
     loudnessRangeLu: lraMetrics.loudnessRangeLu,
     shortTermTimeline: lraMetrics.shortTermPoints
   };

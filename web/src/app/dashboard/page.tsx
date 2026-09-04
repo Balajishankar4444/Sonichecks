@@ -23,30 +23,40 @@ import {
   PartyPopper, 
   RefreshCw, 
   Zap,
-  Info
+  Info,
+  Sliders,
+  FileText,
+  FileCode2
 } from 'lucide-react';
 import { getSavedHistory, getUsageState, updatePlan, UsageState } from '@/lib/storage';
-import { BatchQCResult, QCStatus } from '@/types/qc';
+import { BatchQCResult, QCProfile, QCStatus } from '@/types/qc';
 import { ProductTier, TIER_CONFIGS, getTierConfig } from '@/config/tiers';
 import UpgradePromptModal, { UpgradePromptState } from '@/components/common/UpgradePromptModal';
 import TierBadgeSelector from '@/components/common/TierBadgeSelector';
-import { downloadPdfReport, downloadCsvReport } from '@/lib/api';
+import { downloadPdfCertificate } from '@/lib/reports/pdf-export';
+import { downloadCsvLocally } from '@/lib/reports/csv-export';
+import { exportQcResultAsJson } from '@/lib/reports/json-export';
 import { useAuth } from '@/context/AuthContext';
+import { loadProjects, saveProject, deleteProject, ProjectItem } from '@/lib/storage/project-storage';
+import { loadCustomProfiles, deleteCustomProfile } from '@/lib/storage/custom-profiles';
+import CustomProfileModal from '@/components/qc/CustomProfileModal';
 
 export default function DashboardPage() {
   const { user, openAuthModal, loading: authLoading } = useAuth();
   const [history, setHistory] = useState<BatchQCResult[]>([]);
   const [usage, setUsage] = useState<UsageState | null>(null);
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [customProfiles, setCustomProfiles] = useState<QCProfile[]>([]);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const [projects, setProjects] = useState<{ id: string; name: string; client: string; fileCount: number; date: string }[]>([
-    { id: 'proj-1', name: 'Summer EP Master 2026', client: 'Midnight Records', fileCount: 4, date: '2026-09-02' },
-    { id: 'proj-2', name: 'Podcast Season 3 Delivery', client: 'AudioSphere Media', fileCount: 12, date: '2026-08-28' },
-  ]);
+  // Project Creation Modal state
   const [newProjectName, setNewProjectName] = useState('');
   const [newClientName, setNewClientName] = useState('');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+
+  // Custom Profile Modal state
+  const [showCustomProfileModal, setShowCustomProfileModal] = useState(false);
 
   const [upgradePrompt, setUpgradePrompt] = useState<UpgradePromptState | null>(null);
 
@@ -54,6 +64,8 @@ export default function DashboardPage() {
     const targetEmail = overrideEmail !== undefined ? overrideEmail : (user?.email || undefined);
     setHistory(getSavedHistory(targetEmail));
     setUsage(getUsageState(targetEmail));
+    setProjects(loadProjects());
+    setCustomProfiles(loadCustomProfiles());
   };
 
   const syncSubscriptionWithServer = async (emailToSync?: string, showNotification: boolean = false) => {
@@ -83,10 +95,8 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    // 1. Initial load for the authenticated user
     refreshState(user?.email || undefined);
 
-    // 2. Check URL parameters for Creem payment return (only on first-time return from checkout)
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const paymentStatus = urlParams.get('payment');
@@ -100,18 +110,20 @@ export default function DashboardPage() {
       }
     }
 
-    // 3. Silent background auto-sync from server (no banner shown)
     if (user?.email) {
       syncSubscriptionWithServer(user.email, false);
     }
 
-    // 4. Listen for global plan updates
     const handlePlanUpdate = () => refreshState(user?.email || undefined);
     window.addEventListener('sonichecks_plan_updated', handlePlanUpdate);
+    window.addEventListener('sonichecks_projects_updated', handlePlanUpdate);
+    window.addEventListener('sonichecks_custom_profiles_updated', handlePlanUpdate);
     window.addEventListener('storage', handlePlanUpdate);
 
     return () => {
       window.removeEventListener('sonichecks_plan_updated', handlePlanUpdate);
+      window.removeEventListener('sonichecks_projects_updated', handlePlanUpdate);
+      window.removeEventListener('sonichecks_custom_profiles_updated', handlePlanUpdate);
       window.removeEventListener('storage', handlePlanUpdate);
     };
   }, [user?.email]);
@@ -140,19 +152,26 @@ export default function DashboardPage() {
     e.preventDefault();
     if (!newProjectName.trim()) return;
 
-    setProjects([
-      {
-        id: `proj-${Date.now()}`,
-        name: newProjectName,
-        client: newClientName || 'Direct Client',
-        fileCount: 0,
-        date: new Date().toISOString().slice(0, 10)
-      },
-      ...projects
-    ]);
+    const newProj: ProjectItem = {
+      id: `proj-${Date.now()}`,
+      name: newProjectName.trim(),
+      client: newClientName.trim() || 'Direct Client',
+      created_at: new Date().toISOString(),
+      files: []
+    };
+
+    saveProject(newProj);
     setNewProjectName('');
     setNewClientName('');
     setShowNewProjectModal(false);
+    setProjects(loadProjects());
+  };
+
+  const handleDeleteProject = (projId: string) => {
+    if (confirm('Delete this project record from local storage?')) {
+      deleteProject(projId);
+      setProjects(loadProjects());
+    }
   };
 
   const usagePercent = usage ? Math.min(100, Math.round((usage.filesChecked / tierConfig.monthlyFileLimit) * 100)) : 0;
@@ -228,7 +247,7 @@ export default function DashboardPage() {
               </span>
             </div>
             <p className="text-xs sm:text-sm text-slate-400">
-              Account: <span className="text-white font-medium">{user?.email || 'Guest User'}</span> &bull; Track file allowances and past runs.
+              Account: <span className="text-white font-medium">{user?.email || 'Guest User'}</span> &bull; Track file allowances, projects, and custom profiles.
             </p>
           </div>
 
@@ -274,19 +293,31 @@ export default function DashboardPage() {
             </div>
             <div>
               <div className="text-3xl font-black text-white font-mono">
-                {usage?.filesChecked ?? 0} <span className="text-sm font-normal text-slate-400">/ {tierConfig.monthlyFileLimit} files</span>
+                {user?.filesChecked ?? usage?.filesChecked ?? 0}{' '}
+                <span className="text-sm font-normal text-slate-400">
+                  / {userTier === 'STUDIO' || user?.plan === 'studio' || user?.monthlyAllowance === -1 ? 'Unlimited' : `${user?.monthlyAllowance ?? tierConfig.monthlyFileLimit} files`}
+                </span>
               </div>
               <div className="w-full bg-slate-800 h-2 rounded-full mt-3 overflow-hidden">
                 <div 
                   className={`h-full transition-all duration-500 ${
-                    usagePercent >= 100 ? 'bg-rose-500' : usagePercent > 80 ? 'bg-amber-400' : 'bg-cyan-400'
+                    userTier === 'STUDIO' || user?.plan === 'studio' || user?.monthlyAllowance === -1
+                      ? 'bg-purple-400 w-full'
+                      : usagePercent >= 100
+                      ? 'bg-rose-500'
+                      : usagePercent > 80
+                      ? 'bg-amber-400'
+                      : 'bg-cyan-400'
                   }`}
-                  style={{ width: `${usagePercent}%` }}
+                  style={{ width: userTier === 'STUDIO' || user?.plan === 'studio' || user?.monthlyAllowance === -1 ? '100%' : `${usagePercent}%` }}
                 />
               </div>
             </div>
             <p className="text-[11px] text-slate-400">
-              {Math.max(0, tierConfig.monthlyFileLimit - (usage?.filesChecked ?? 0))} checks remaining in {usage?.month || 'current cycle'}.
+              {userTier === 'STUDIO' || user?.plan === 'studio' || user?.monthlyAllowance === -1
+                ? `Unlimited monthly checks active \u2022 Quota resets ${user?.resetDate ? new Date(user.resetDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'every 30 days'}.`
+                : `${Math.max(0, (user?.monthlyAllowance ?? tierConfig.monthlyFileLimit) - (user?.filesChecked ?? usage?.filesChecked ?? 0))} checks remaining \u2022 Quota resets ${user?.resetDate ? new Date(user.resetDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'every 30 days'}.`
+              }
             </p>
           </div>
 
@@ -299,10 +330,10 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-2xl font-bold text-white capitalize">{tierConfig.name}</span>
-                <span className="text-sm font-semibold text-slate-400">€{tierConfig.priceEur}</span>
+                <span className="text-sm font-semibold text-slate-400">€{tierConfig.priceEur}/mo</span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                Batch size: up to {tierConfig.maxBatchSize} files &bull; {userTier === 'FREE' ? 'Single checks' : 'Full Batch Matrix'}
+                Batch size: up to {tierConfig.maxBatchSize} files &bull; {userTier === 'FREE' ? 'Single-file QC' : 'Full Matrix & Evidence'}
               </p>
             </div>
             {userTier === 'FREE' ? (
@@ -314,22 +345,37 @@ export default function DashboardPage() {
                 <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             ) : (
-              <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Subscription Active</span>
-              </span>
+              <div className="flex items-center justify-between text-[11px]">
+                {user?.status === 'cancelled' ? (
+                  <span className="text-amber-400 font-semibold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Auto-Renewal Cancelled</span>
+                  </span>
+                ) : (
+                  <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Subscription Active</span>
+                  </span>
+                )}
+                <Link
+                  href="/pricing"
+                  className="text-slate-400 hover:text-cyan-400 text-xs transition-colors"
+                >
+                  Manage Plan
+                </Link>
+              </div>
             )}
           </div>
 
           {/* QC Inspection Summary */}
           <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-400">Saved History</span>
+              <span className="text-xs font-medium text-slate-400">Inspection History</span>
               <Clock className="w-4 h-4 text-cyan-400" />
             </div>
             <div>
-              <div className="text-3xl font-black text-white">
-                {history.length} <span className="text-sm font-normal text-slate-400">QC batches</span>
+              <div className="text-3xl font-black text-white font-mono">
+                {history.length} <span className="text-sm font-normal text-slate-400">batches</span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
                 Total tracks inspected: {history.reduce((acc, b) => acc + (b.summary?.total_files || 0), 0)}
@@ -341,24 +387,156 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Local Device Storage Notice Banner */}
-        <div className="p-4 rounded-2xl bg-blue-950/20 border border-blue-500/30 text-xs text-blue-200 flex items-start gap-3 shadow-md">
-          <Info className="w-4 h-4 text-cyan-400 flex-shrink-0 mt-0.5" />
-          <div className="space-y-0.5">
-            <span className="font-bold text-white">Local Device Storage Notice:</span>
-            <p className="text-slate-300">
-              Inspection certificates and batch metrics are stored securely in this browser&apos;s local storage. Download your PDF Certificates or CSV spreadsheets to keep permanent records on your computer, as clearing browser cache or switching devices will reset local inspection history.
-            </p>
-          </div>
-        </div>
-
-        {/* History / Recent QC Batches Section */}
+        {/* Section 1: Local Projects & Version Organization (Phase 5) */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Clock className="w-5 h-5 text-cyan-400" />
-              <span>Recent QC Inspections</span>
-            </h2>
+            <div className="flex items-center gap-2">
+              <FolderKanban className="w-5 h-5 text-cyan-400" />
+              <h2 className="text-lg font-bold text-white">Client Projects &amp; Versions</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (userTier === 'FREE') {
+                  triggerGate('Projects & Organization', 'Project organization and track revision tracking are available on Pro and Studio plans.', 'PRO');
+                  return;
+                }
+                setShowNewProjectModal(true);
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 hover:border-cyan-400 text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              {userTier === 'FREE' ? <Lock className="w-3.5 h-3.5 text-amber-400" /> : <Plus className="w-3.5 h-3.5 text-cyan-400" />}
+              <span>{userTier === 'FREE' ? 'New Project (Pro)' : 'New Project'}</span>
+            </button>
+          </div>
+
+          {projects.length === 0 ? (
+            <div className="p-8 text-center rounded-2xl border border-slate-800 bg-slate-900/30 text-xs text-slate-400">
+              No client projects created yet. Organize your files and version progressions locally.
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-4">
+              {projects.map(proj => (
+                <div key={proj.id} className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">
+                        Client: {proj.client}
+                      </span>
+                      <h3 className="text-base font-bold text-white mt-0.5">{proj.name}</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteProject(proj.id)}
+                      className="text-slate-500 hover:text-rose-400 p-1 cursor-pointer"
+                      title="Delete project"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {proj.files.length === 0 ? (
+                      <div className="text-[11px] text-slate-500 italic">No tracks linked yet.</div>
+                    ) : (
+                      proj.files.map((f, i) => (
+                        <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800/80 text-xs">
+                          <div className="flex items-center gap-2 truncate">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              f.status === 'PASS' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                            }`}>
+                              {f.status}
+                            </span>
+                            <span className="font-medium text-white truncate">{f.filename}</span>
+                            {f.version_tag && (
+                              <span className="text-[10px] font-mono text-cyan-400">({f.version_tag})</span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-slate-500 font-mono shrink-0">{f.profile_name}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Section 2: Custom QC Profiles (Phase 6) */}
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <Sliders className="w-5 h-5 text-purple-400" />
+                <h2 className="text-lg font-bold text-white">Custom Delivery Profiles</h2>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                (Stored locally in your browser cache — export presets before clearing browser data or changing devices)
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (userTier === 'FREE') {
+                  triggerGate('Custom Delivery Profiles', 'Create, version, import, and export custom delivery profiles on Pro and Studio plans.', 'PRO');
+                  return;
+                }
+                setShowCustomProfileModal(true);
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 hover:border-purple-400 text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              {userTier === 'FREE' ? <Lock className="w-3.5 h-3.5 text-amber-400" /> : <Plus className="w-3.5 h-3.5 text-purple-400" />}
+              <span>{userTier === 'FREE' ? 'Create Custom Profile (Pro)' : 'Create Custom Profile'}</span>
+            </button>
+          </div>
+
+          {customProfiles.length === 0 ? (
+            <div className="p-6 text-center rounded-2xl border border-slate-800 bg-slate-900/30 text-xs text-slate-400">
+              No custom QC profiles created. Create custom profiles to enforce specific client or label loudness and peak specifications.
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-3 gap-3">
+              {customProfiles.map(p => (
+                <div key={p.profile_id} className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono text-purple-400 font-bold uppercase">{p.platform} &bull; v{p.version}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          deleteCustomProfile(p.profile_id);
+                          setCustomProfiles(loadCustomProfiles());
+                        }}
+                        className="text-slate-500 hover:text-rose-400 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="font-bold text-white text-sm mt-1">{p.name}</div>
+                    <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{p.description}</p>
+                  </div>
+                  <div className="pt-2 border-t border-slate-800 text-[10px] font-mono text-cyan-300 font-bold">
+                    {p.rules.min_lufs !== undefined ? `${p.rules.min_lufs} to ${p.rules.max_lufs} LUFS` : 'Universal'} &bull; ≤ {p.rules.max_true_peak_dbtp ?? -1.0} dBTP
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Section 3: History / Recent QC Batches Section */}
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Clock className="w-5 h-5 text-cyan-400" />
+                <span>Recent QC Inspections</span>
+              </h2>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                (Stored locally on your device/browser cache — private and never uploaded to cloud audio storage)
+              </p>
+            </div>
             {history.length > 0 && (
               <span className="text-xs text-slate-400">Showing last {history.length} batches</span>
             )}
@@ -429,31 +607,46 @@ export default function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (!tierConfig.allowPdfExport) {
+                          if (!tierConfig.pdfCertificate) {
                             triggerGate('PDF QC Certificate', 'Export cryptographic PDF inspection certificates with SHA-256 signatures for your clients.', 'PRO');
                             return;
                           }
-                          downloadPdfReport(batch);
+                          downloadPdfCertificate(batch);
                         }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 transition-colors cursor-pointer"
                       >
                         <FileDown className="w-3.5 h-3.5 text-cyan-400" />
-                        <span>PDF Report</span>
+                        <span>PDF Certificate</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => {
-                          if (!tierConfig.allowCsvExport) {
+                          if (!tierConfig.csvExport) {
                             triggerGate('CSV Matrix Export', 'Download structured CSV inspection reports and multi-track metadata spreadsheets.', 'PRO');
                             return;
                           }
-                          downloadCsvReport(batch);
+                          downloadCsvLocally(batch);
                         }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 transition-colors cursor-pointer"
                       >
                         <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
                         <span>CSV Matrix</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!tierConfig.jsonExport) {
+                            triggerGate('Machine-Readable JSON Export', 'Download structured JSON metrics for automated studio pipelines on the Studio plan.', 'STUDIO');
+                            return;
+                          }
+                          exportQcResultAsJson(batch);
+                        }}
+                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors cursor-pointer"
+                        title="Export JSON (Studio)"
+                      >
+                        <FileCode2 className="w-3.5 h-3.5 text-purple-400" />
                       </button>
                     </div>
                   </div>
@@ -462,6 +655,60 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+
+        {/* New Project Modal */}
+        {showNewProjectModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="w-full max-w-md bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4 animate-in fade-in zoom-in-95">
+              <h3 className="text-base font-bold text-white">Create New Project</h3>
+              <form onSubmit={handleCreateProject} className="space-y-3 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Project Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    placeholder="e.g. Summer EP 2026"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Client / Label</label>
+                  <input
+                    type="text"
+                    value={newClientName}
+                    onChange={(e) => setNewClientName(e.target.value)}
+                    placeholder="e.g. Atlantic Records / Private"
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewProjectModal(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-800 text-slate-400"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-cyan-400 text-slate-950 font-bold"
+                  >
+                    Create Project
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Profile Modal */}
+        <CustomProfileModal
+          isOpen={showCustomProfileModal}
+          onClose={() => setShowCustomProfileModal(false)}
+          onProfileCreated={() => setCustomProfiles(loadCustomProfiles())}
+        />
 
         {/* Upgrade Prompt Modal */}
         <UpgradePromptModal

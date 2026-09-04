@@ -1,0 +1,236 @@
+import { 
+  getOrSyncUserSubscription, 
+  recordBackendUploadEvent, 
+  cancelUserSubscription,
+  getPlanAllowance, 
+  UserSubscriptionRecord 
+} from '../subscription-engine';
+
+function assert(condition: boolean, message: string) {
+  if (!condition) {
+    throw new Error(`Assertion failed: ${message}`);
+  }
+}
+
+class MockFirestoreCollection {
+  private docs: Map<string, any> = new Map();
+
+  doc(id: string) {
+    const self = this;
+    return {
+      async get() {
+        const data = self.docs.get(id);
+        return {
+          exists: !!data,
+          data: () => (data ? { ...data } : undefined)
+        };
+      },
+      async set(newData: any, options?: { merge?: boolean }) {
+        if (options?.merge && self.docs.has(id)) {
+          const current = self.docs.get(id);
+          self.docs.set(id, { ...current, ...newData });
+        } else {
+          self.docs.set(id, { ...newData });
+        }
+      }
+    };
+  }
+
+  _getRaw(id: string) {
+    return this.docs.get(id);
+  }
+
+  _setRaw(id: string, data: any) {
+    this.docs.set(id, data);
+  }
+}
+
+class MockFirestore {
+  private collections: Map<string, MockFirestoreCollection> = new Map();
+
+  collection(name: string) {
+    if (!this.collections.has(name)) {
+      this.collections.set(name, new MockFirestoreCollection());
+    }
+    return this.collections.get(name)!;
+  }
+}
+
+export async function runSubscriptionTimelineTests() {
+  console.log('🧪 Running Backend Subscription & Usage Timeline Engine Test Suite...\n');
+
+  const mockDb = new MockFirestore() as any;
+
+  // 1. Test Free User Creation & Initial Timeline
+  {
+    const email = 'new_audio_user@example.com';
+    const user = await getOrSyncUserSubscription(email, {
+      displayName: 'Test User',
+      overrideAdminDb: mockDb
+    });
+
+    assert(user.plan === 'free', 'New user must start on Free plan');
+    assert(user.monthlyAllowance === 5, 'Free user allowance must be 5');
+    assert(user.filesChecked === 0, 'New user filesChecked must be 0');
+    assert(user.daysRemaining > 0 && user.daysRemaining <= 30, 'Days remaining must be <= 30');
+    assert(!!user.subscriptionStartDate, 'Must have subscriptionStartDate');
+    assert(!!user.subscriptionEndDate, 'Must have subscriptionEndDate');
+    assert(!!user.resetDate, 'Must have resetDate');
+
+    const start = new Date(user.subscriptionStartDate).getTime();
+    const end = new Date(user.subscriptionEndDate).getTime();
+    const diffDays = Math.round((end - start) / (1000 * 60 * 60 * 24));
+    assert(diffDays >= 29 && diffDays <= 31, 'Subscription timeline duration must be 30 days');
+    console.log('  ✅ Test 1: New Free user 30-day timeline & quota initialization passed');
+  }
+
+  // 2. Test Upload Event & Quota Decrementing
+  {
+    const email = 'uploader@example.com';
+    await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+
+    // Upload 3 files
+    const res1 = await recordBackendUploadEvent(email, 3, { overrideAdminDb: mockDb });
+    assert(res1.success, 'First upload batch should succeed');
+    assert(res1.record.filesChecked === 3, 'filesChecked should be 3');
+    assert(!!res1.record.lastUploadAt, 'lastUploadAt must be populated');
+
+    // Upload 2 files (now 5/5)
+    const res2 = await recordBackendUploadEvent(email, 2, { overrideAdminDb: mockDb });
+    assert(res2.success, 'Second batch should reach 5/5 max');
+    assert(res2.record.filesChecked === 5, 'filesChecked should be 5');
+
+    // Attempt to exceed quota (1 more file on Free)
+    const res3 = await recordBackendUploadEvent(email, 1, { overrideAdminDb: mockDb });
+    assert(!res3.success, 'Exceeding quota should fail with error');
+    assert(!!res3.error && res3.error.includes('quota exceeded'), 'Error should state quota exceeded');
+    console.log('  ✅ Test 2: Upload event tracking and hard quota enforcement passed');
+  }
+
+  // 3. Test Upgrade to Pro Plan Timeline
+  {
+    const email = 'pro_subscriber@example.com';
+    const upgraded = await getOrSyncUserSubscription(email, {
+      forcePlan: 'pro',
+      overrideAdminDb: mockDb
+    });
+
+    assert(upgraded.plan === 'pro', 'Plan must be Pro');
+    assert(upgraded.tier === 'PRO', 'Tier must be PRO');
+    assert(upgraded.monthlyAllowance === 100, 'Pro allowance must be 100 files');
+    assert(upgraded.filesChecked === 0, 'Quota must reset to 0 on plan upgrade');
+    assert(upgraded.daysRemaining >= 29 && upgraded.daysRemaining <= 30, 'Pro plan starts with 30 days remaining');
+    console.log('  ✅ Test 3: Upgrade to Pro (€4.99) with 100-file allowance and 30-day timeline passed');
+  }
+
+  // 4. Test Upgrade to Studio Plan Timeline & Unlimited Quota
+  {
+    const email = 'studio_subscriber@example.com';
+    const studio = await getOrSyncUserSubscription(email, {
+      forcePlan: 'studio',
+      overrideAdminDb: mockDb
+    });
+
+    assert(studio.plan === 'studio', 'Plan must be Studio');
+    assert(studio.tier === 'STUDIO', 'Tier must be STUDIO');
+    assert(studio.monthlyAllowance === -1, 'Studio allowance must be -1 (Unlimited)');
+    assert(studio.daysRemaining >= 29 && studio.daysRemaining <= 30, 'Studio plan starts with 30 days remaining');
+
+    // Studio user can check large batches without quota restrictions
+    const largeBatch = await recordBackendUploadEvent(email, 1500, { overrideAdminDb: mockDb });
+    assert(largeBatch.success === true, 'Studio user must be allowed to check unlimited files');
+    assert(largeBatch.record.filesChecked === 1500, 'Studio user usage tracks 1500 files');
+    console.log('  ✅ Test 4: Upgrade to Studio (€14.99) with Unlimited file allowance passed');
+  }
+
+  // 5. Test Automatic Downgrade on Expiration (Antigravity timeline rule)
+  {
+    const email = 'expired_user@example.com';
+    // Simulate a past subscription that ended 2 days ago
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const thirtyTwoDaysAgo = new Date(Date.now() - 32 * 24 * 60 * 60 * 1000).toISOString();
+
+    const usersCol = mockDb.collection('users');
+    await usersCol.doc(email).set({
+      email,
+      plan: 'pro',
+      tier: 'PRO',
+      status: 'active',
+      subscriptionStartDate: thirtyTwoDaysAgo,
+      subscriptionEndDate: twoDaysAgo,
+      resetDate: twoDaysAgo,
+      filesChecked: 85,
+      monthlyAllowance: 100,
+      registeredAt: thirtyTwoDaysAgo
+    });
+
+    // Evaluate subscription timeline now
+    const evaluated = await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+
+    assert(evaluated.plan === 'free', 'Expired paid subscription must automatically downgrade to free');
+    assert(evaluated.tier === 'FREE', 'Tier must be FREE');
+    assert(evaluated.status === 'expired', 'Status must be expired');
+    assert(evaluated.monthlyAllowance === 5, 'Allowance must be reset to 5 files');
+    assert(evaluated.filesChecked === 0, 'New free period filesChecked must be 0');
+    assert(new Date(evaluated.subscriptionEndDate).getTime() > Date.now(), 'Must set new 30-day free timeline');
+    console.log('  ✅ Test 5: Automatic downgrade from expired paid plan to Free plan passed');
+  }
+
+  // 6. Test Quota Rollover on Reset Date
+  {
+    const email = 'rollover_user@example.com';
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const twentyNineDaysAgo = new Date(Date.now() - 29 * 24 * 60 * 60 * 1000).toISOString();
+    const futureEnd = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString();
+
+    const usersCol = mockDb.collection('users');
+    await usersCol.doc(email).set({
+      email,
+      plan: 'pro',
+      tier: 'PRO',
+      status: 'active',
+      subscriptionStartDate: twentyNineDaysAgo,
+      subscriptionEndDate: futureEnd,
+      resetDate: yesterday, // Reset date passed yesterday
+      filesChecked: 95,
+      monthlyAllowance: 100
+    });
+
+    const rolledOver = await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+    assert(rolledOver.plan === 'pro', 'Plan remains Pro');
+    assert(rolledOver.filesChecked === 0, 'filesChecked must reset to 0 after resetDate passes');
+    assert(new Date(rolledOver.resetDate).getTime() > Date.now(), 'New resetDate must be in the future');
+    console.log('  ✅ Test 6: Automatic quota rollover and resetDate advancement passed');
+  }
+
+  // 7. Test Subscription Cancellation & Access Retention
+  {
+    const email = 'cancel_test_user@example.com';
+    // Activate Pro
+    await getOrSyncUserSubscription(email, {
+      forcePlan: 'pro',
+      overrideAdminDb: mockDb
+    });
+
+    // Cancel subscription
+    const cancelRes = await cancelUserSubscription(email, { overrideAdminDb: mockDb });
+    assert(cancelRes.success === true, 'Cancellation must succeed');
+    assert(cancelRes.record.status === 'cancelled', 'Status must be cancelled');
+    assert(cancelRes.record.plan === 'pro', 'Plan remains Pro until period end');
+
+    // Perform check during cancelled period (retains paid access)
+    const checkRes = await recordBackendUploadEvent(email, 10, { overrideAdminDb: mockDb });
+    assert(checkRes.success === true, 'User retains paid access during remaining period');
+
+    console.log('  ✅ Test 7: Subscription cancellation & active access retention until cycle end passed');
+  }
+
+  console.log('\n🎉 ALL 7 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
+}
+
+if (typeof process !== 'undefined' && process.argv && process.argv[1]?.includes('subscription-engine.test')) {
+  runSubscriptionTimelineTests().catch((err) => {
+    console.error('❌ Test failure:', err);
+    process.exit(1);
+  });
+}

@@ -19,6 +19,13 @@ export interface SonichecksUser {
   displayName?: string | null;
   plan?: 'free' | 'pro' | 'studio';
   tier?: 'FREE' | 'PRO' | 'STUDIO';
+  status?: 'active' | 'expired' | 'cancelled';
+  subscriptionStartDate?: string;
+  subscriptionEndDate?: string;
+  resetDate?: string;
+  daysRemaining?: number;
+  filesChecked?: number;
+  monthlyAllowance?: number;
   lastLoginAt?: string;
   registeredAt?: string;
   isAnonymous?: boolean;
@@ -35,6 +42,8 @@ interface AuthContextType {
   signUpWithEmail: (email: string, pass: string) => Promise<void>;
   signInWithLocalEmail: (email: string) => Promise<void>;
   setUserPlan: (plan: 'free' | 'pro' | 'studio') => Promise<void>;
+  syncUserWithServer: (overrideEmail?: string) => Promise<void>;
+  cancelSubscription: () => Promise<{ success: boolean; message?: string }>;
   logout: () => Promise<void>;
   authSuccessCallback: (() => void) | null;
 }
@@ -51,12 +60,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const syncLoginWithServer = async (u: SonichecksUser) => {
     if (!u.email) return;
     try {
+      // Calculate total files checked in the current month from history
+      const localUsage = getUsageState(u.email);
+      const clientFilesChecked = localUsage.filesChecked;
+
       const res = await fetch('/api/user/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: u.email,
-          displayName: u.displayName
+          displayName: u.displayName,
+          clientFilesChecked
         })
       });
       if (res.ok) {
@@ -64,6 +78,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.plan) {
           u.plan = data.plan;
           u.tier = data.tier || data.plan.toUpperCase();
+          u.status = data.status || 'active';
+          u.subscriptionStartDate = data.subscriptionStartDate;
+          u.subscriptionEndDate = data.subscriptionEndDate;
+          u.resetDate = data.resetDate;
+          u.daysRemaining = data.daysRemaining;
+          u.filesChecked = data.filesChecked;
+          u.monthlyAllowance = data.monthlyAllowance;
           u.lastLoginAt = data.lastLoginAt;
           u.registeredAt = data.registeredAt;
           updatePlan(data.plan, u.email);
@@ -76,6 +97,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.warn('Server user sync notice:', err);
     }
+  };
+
+  const syncUserWithServer = async (overrideEmail?: string) => {
+    const targetEmail = overrideEmail || user?.email;
+    if (!targetEmail) return;
+    const currentUser = user || { email: targetEmail, uid: targetEmail, plan: 'free' };
+    await syncLoginWithServer(currentUser);
   };
 
   useEffect(() => {
@@ -254,6 +282,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const cancelSubscription = async (): Promise<{ success: boolean; message?: string }> => {
+    if (!user?.email) {
+      return { success: false, message: 'Please sign in to manage your subscription.' };
+    }
+    try {
+      const res = await fetch('/api/subscription/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const updatedUser: SonichecksUser = {
+          ...user,
+          status: 'cancelled'
+        };
+        setUser(updatedUser);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(updatedUser));
+        }
+        return { success: true, message: data.message };
+      }
+      return { success: false, message: data.error || 'Failed to cancel subscription.' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network communication error.' };
+    }
+  };
+
   const logout = async () => {
     setUser(null);
     if (typeof window !== 'undefined') {
@@ -280,6 +336,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signUpWithEmail,
         signInWithLocalEmail,
         setUserPlan,
+        syncUserWithServer,
+        cancelSubscription,
         logout,
         authSuccessCallback
       }}

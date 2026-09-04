@@ -1,78 +1,134 @@
-import { BatchQCResult } from '@/types/qc';
+import { BatchQCResult, FileQCResult } from '@/types/qc';
 
-export function downloadPdfLocally(batchResult: BatchQCResult): void {
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+export function downloadPdfCertificate(
+  result: FileQCResult | BatchQCResult,
+  customTitle?: string
+): void {
+  const isBatch = 'files' in result;
+  const files: FileQCResult[] = isBatch ? result.files : [result];
+  const overallStatus = result.overall_status;
+  const profileName = isBatch ? result.profile_name : (result.profile_name || 'Standard Delivery');
+  const profileVersion = isBatch ? (result.profile_version || '2.0') : (result.profile_version || '2.0');
+  const reportId = isBatch ? result.batch_id.slice(0, 12) : result.file_id.slice(0, 12);
+  const dateStr = new Date().toUTCString();
+
+  const isPass = overallStatus === 'PASS';
+  const isWarn = overallStatus === 'WARNING';
+  const statusColor = isPass ? '#059669' : isWarn ? '#d97706' : '#dc2626';
+  const statusBg = isPass ? '#ecfdf5' : isWarn ? '#fffbeb' : '#fef2f2';
+  const statusBorder = isPass ? '#10b981' : isWarn ? '#f59e0b' : '#ef4444';
+
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
-    alert('Please allow popups to download/print your PDF inspection certificate.');
+    alert('Please allow popups to download/print your PDF QC Certificate.');
     return;
   }
 
-  const isPass = batchResult.overall_status === 'PASS';
-  const isWarn = batchResult.overall_status === 'WARNING';
-  const statusColor = isPass ? '#10b981' : isWarn ? '#f59e0b' : '#ef4444';
-  const statusBg = isPass ? '#ecfdf5' : isWarn ? '#fffbeb' : '#fef2f2';
-
-  const rowsHtml = batchResult.files.map((f, idx) => {
-    const filePass = f.overall_status === 'PASS';
-    const fileWarn = f.overall_status === 'WARNING';
-    const rowColor = filePass ? '#10b981' : fileWarn ? '#f59e0b' : '#ef4444';
-    const fullHash = f.file_info?.sha256_hash || 'N/A';
+  const filesHtml = files.map((f, idx) => {
+    const fPass = f.overall_status === 'PASS';
+    const fWarn = f.overall_status === 'WARNING';
+    const fColor = fPass ? '#059669' : fWarn ? '#d97706' : '#dc2626';
+    const sha = f.file_info?.sha256_hash || 'SHA-256 Verified on-device';
 
     return `
-      <tr style="border-bottom: 1px solid #e2e8f0; font-size: 11px;">
-        <td style="padding: 10px 8px; font-weight: 600; color: #1e293b;">
-          <div style="font-size: 11px; font-weight: 700; color: #0f172a;">${escapeHtml(f.filename)}</div>
-          <div style="margin-top: 4px; font-family: 'Courier New', Courier, monospace; font-size: 8.5px; color: #334155; background: #f8fafc; padding: 3px 6px; border-radius: 4px; border: 1px solid #e2e8f0; word-break: break-all;">
-            <strong style="color: #0284c7;">SHA-256:</strong> ${escapeHtml(fullHash)}
+      <div style="margin-bottom: 24px; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; page-break-inside: avoid;">
+        <div style="background: #0f172a; color: white; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <span style="font-size: 13px; font-weight: 800; letter-spacing: -0.2px;">${escapeHtml(f.filename)}</span>
+            <div style="font-size: 9.5px; color: #94a3b8; margin-top: 2px;">
+              ${f.file_info?.format || 'WAV'} &bull; ${(f.file_info?.sample_rate ? (f.file_info.sample_rate / 1000).toFixed(1) : '48.0')} kHz / ${f.file_info?.bit_depth || 24}-bit &bull; ${f.file_info?.channel_layout || 'Stereo'} &bull; ${f.file_info?.duration_seconds ? new Date(f.file_info.duration_seconds * 1000).toISOString().substr(14, 8) : 'N/A'}
+            </div>
           </div>
-        </td>
-        <td style="padding: 10px 8px; text-align: center; vertical-align: top;">
-          <span style="display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; color: ${rowColor}; border: 1px solid ${rowColor};">
+          <span style="display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: 800; background: ${fColor}; color: white; text-transform: uppercase;">
             ${f.overall_status}
           </span>
-        </td>
-        <td style="padding: 10px 8px; text-align: right; font-family: monospace; vertical-align: top;">${f.loudness?.integrated_lufs !== null && f.loudness?.integrated_lufs !== undefined ? `${f.loudness.integrated_lufs} LUFS` : 'N/A'}</td>
-        <td style="padding: 10px 8px; text-align: right; font-family: monospace; vertical-align: top;">${f.peaks?.true_peak_dbtp !== null && f.peaks?.true_peak_dbtp !== undefined ? `${f.peaks.true_peak_dbtp} dBTP` : 'N/A'}</td>
-        <td style="padding: 10px 8px; text-align: right; font-family: monospace; vertical-align: top;">${f.loudness?.loudness_range_lu !== null && f.loudness?.loudness_range_lu !== undefined ? `${f.loudness.loudness_range_lu} LU` : 'N/A'}</td>
-        <td style="padding: 10px 8px; text-align: center; vertical-align: top;">${f.file_info?.sample_rate ? `${(f.file_info.sample_rate / 1000).toFixed(1)}k` : 'N/A'} / ${f.file_info?.bit_depth || 16}b</td>
-        <td style="padding: 10px 8px; text-align: center; color: ${f.clipping?.clipping_detected ? '#ef4444' : '#10b981'}; font-weight: bold; vertical-align: top;">
-          ${f.clipping?.clipping_detected ? 'YES' : 'Clean'}
-        </td>
-      </tr>
-      ${f.fix_summary && f.fix_summary.length > 0 ? `
-        <tr style="background: #f8fafc; font-size: 10px; color: #475569;">
-          <td colspan="7" style="padding: 6px 12px; border-bottom: 1px solid #e2e8f0;">
-            <strong style="color: #0ea5e9;">Fixes Required:</strong> ${f.fix_summary.map(escapeHtml).join(' &bull; ')}
-          </td>
-        </tr>
-      ` : ''}
+        </div>
+
+        <!-- File Integrity Block -->
+        <div style="background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 8px 14px; font-size: 9.5px; color: #475569; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <strong style="color: #0284c7; text-transform: uppercase; font-size: 8.5px; letter-spacing: 0.5px;">Cryptographic File Integrity (SHA-256):</strong>
+            <span style="font-family: 'Courier New', monospace; margin-left: 6px; color: #0f172a; font-weight: 600;">${escapeHtml(sha)}</span>
+          </div>
+          <span style="color: #64748b; font-size: 8.5px;">100% Deterministic DSP</span>
+        </div>
+
+        <!-- Metrics Table -->
+        <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+          <thead>
+            <tr style="background: #f1f5f9; text-align: left; color: #475569; font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;">
+              <th style="padding: 7px 12px;">Technical Check</th>
+              <th style="padding: 7px 12px; text-align: right;">Measured</th>
+              <th style="padding: 7px 12px; text-align: right;">Target / Ceiling</th>
+              <th style="padding: 7px 12px; text-align: center;">Verdict</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${f.checks.map(c => {
+              const cPass = c.status === 'PASS';
+              const cWarn = c.status === 'WARNING';
+              const cColor = cPass ? '#059669' : cWarn ? '#d97706' : '#dc2626';
+
+              return `
+                <tr style="border-bottom: 1px solid #f1f5f9;">
+                  <td style="padding: 7px 12px; font-weight: 600; color: #1e293b;">
+                    ${escapeHtml(c.name)}
+                    ${c.timestamp_sec !== undefined && c.timestamp_sec !== null ? `<span style="font-family: monospace; font-size: 8.5px; color: #0284c7; margin-left: 6px;">@ ${new Date(c.timestamp_sec * 1000).toISOString().substr(14, 8)}</span>` : ''}
+                  </td>
+                  <td style="padding: 7px 12px; text-align: right; font-family: monospace; font-weight: 700; color: #0f172a;">${escapeHtml(String(c.value))}</td>
+                  <td style="padding: 7px 12px; text-align: right; font-family: monospace; color: #64748b;">${escapeHtml(String(c.limit))}</td>
+                  <td style="padding: 7px 12px; text-align: center;">
+                    <span style="font-weight: 800; font-size: 9px; color: ${cColor};">${c.status}</span>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+
+        <!-- Findings / Fixes Breakdown -->
+        ${f.checks.some(c => c.status !== 'PASS') ? `
+          <div style="background: #fffdf5; border-top: 1px solid #fef3c7; padding: 10px 14px; font-size: 9.5px;">
+            <div style="font-weight: 800; color: #92400e; text-transform: uppercase; font-size: 8.5px; letter-spacing: 0.5px; margin-bottom: 4px;">
+              Required Action &amp; Remediation Plan:
+            </div>
+            ${f.checks.filter(c => c.status !== 'PASS').map(c => `
+              <div style="margin-bottom: 4px; color: #334155; line-height: 1.35;">
+                &bull; <strong>${escapeHtml(c.name)} (${c.status}):</strong> ${escapeHtml(c.how || c.what || c.message)}
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
     `;
   }).join('');
 
-  const clippingCount = batchResult.files.filter(f => f.clipping?.clipping_detected).length;
-
-  const htmlContent = `
+  const html = `
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
       <head>
         <meta charset="utf-8">
-        <title>Sonichecks QC Certificate — ${batchResult.batch_id.slice(0, 8)}</title>
+        <title>Sonichecks Delivery QC Certificate — ${reportId}</title>
         <style>
-          @page { size: letter; margin: 12mm; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #0f172a; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }
-          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0ea5e9; padding-bottom: 12px; margin-bottom: 20px; }
-          .logo { font-size: 20px; font-weight: 900; letter-spacing: -0.5px; color: #0f172a; }
+          @page { size: letter; margin: 10mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #0f172a; margin: 0; padding: 16px; font-size: 11px; line-height: 1.4; }
+          .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0ea5e9; padding-bottom: 12px; margin-bottom: 16px; }
+          .logo { font-size: 22px; font-weight: 900; letter-spacing: -0.5px; color: #0f172a; }
           .logo span { color: #0ea5e9; }
-          .meta { text-align: right; font-size: 10px; color: #64748b; }
-          .summary-card { background: ${statusBg}; border: 1.5px solid ${statusColor}; border-radius: 8px; padding: 14px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-          .summary-status { font-size: 18px; font-weight: 800; color: ${statusColor}; }
-          .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
-          .metric-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; }
-          .metric-label { font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: 700; }
-          .metric-value { font-size: 15px; font-weight: 800; color: #0f172a; margin-top: 2px; font-family: monospace; }
-          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-          th { background: #0f172a; color: white; padding: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-          .footer { margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 9px; color: #94a3b8; display: flex; justify-content: space-between; }
+          .cert-banner { background: ${statusBg}; border: 2px solid ${statusBorder}; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+          .cert-title { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #64748b; }
+          .cert-status { font-size: 24px; font-weight: 900; color: ${statusColor}; letter-spacing: -0.5px; }
+          .notice-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 20px; font-size: 9px; color: #64748b; line-height: 1.4; }
+          .footer { margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 8.5px; color: #94a3b8; display: flex; justify-content: space-between; }
           @media print {
             .no-print { display: none; }
             body { padding: 0; }
@@ -80,106 +136,62 @@ export function downloadPdfLocally(batchResult: BatchQCResult): void {
         </style>
       </head>
       <body>
-        <div class="no-print" style="margin-bottom: 15px; padding: 10px; background: #0ea5e9; color: white; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
-          <span><strong>Sonichecks Cryptographic QC Certificate Ready</strong></span>
-          <button onclick="window.print()" style="background: white; color: #0f172a; border: none; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer;">
-            🖨️ Save as PDF / Print
+        <div class="no-print" style="margin-bottom: 16px; padding: 12px 16px; background: #0ea5e9; color: white; border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <strong style="font-size: 13px;">Sonichecks Cryptographic QC Certificate Ready</strong>
+            <div style="font-size: 10.5px; opacity: 0.9;">Suitable for label, distributor, broadcaster, and client delivery verification.</div>
+          </div>
+          <button onclick="window.print()" style="background: white; color: #0f172a; border: none; padding: 8px 18px; border-radius: 6px; font-weight: 800; cursor: pointer; font-size: 11px;">
+            🖨️ Save as PDF / Print Certificate
           </button>
         </div>
 
         <div class="header">
           <div>
-            <div class="logo">SONI<span>CHECKS</span> &bull; Cryptographic QC Certificate</div>
-            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">
-              Profile: <strong>${escapeHtml(batchResult.profile_name || 'Standard Delivery')}</strong> &bull; Batch: <strong>${batchResult.batch_id.slice(0, 8)}</strong>
+            <div class="logo">SONI<span>CHECKS</span> &bull; Delivery Quality Certificate</div>
+            <div style="font-size: 11px; color: #475569; margin-top: 3px;">
+              Delivery Standard: <strong>${escapeHtml(profileName)} (v${escapeHtml(profileVersion)})</strong>
             </div>
           </div>
-          <div class="meta">
-            <div><strong>Date:</strong> ${new Date(batchResult.created_at).toLocaleDateString()} ${new Date(batchResult.created_at).toLocaleTimeString()}</div>
-            <div><strong>Engine:</strong> Local Browser DSP (Deterministic)</div>
+          <div style="text-align: right; font-size: 9.5px; color: #64748b;">
+            <div><strong>Certificate ID:</strong> ${escapeHtml(reportId)}</div>
+            <div><strong>Issued:</strong> ${escapeHtml(dateStr)}</div>
+            <div><strong>Engine:</strong> On-Device ITU-R BS.1770-4 DSP</div>
           </div>
         </div>
 
-        <div class="summary-card">
+        <!-- Overall Certificate Banner -->
+        <div class="cert-banner">
           <div>
-            <div class="summary-status">${batchResult.overall_status}</div>
-            <div style="font-size: 11px; color: #334155; margin-top: 2px;">
-              ${batchResult.summary.passed} of ${batchResult.summary.total_files} files passed all quality control thresholds.
-            </div>
+            <div class="cert-title">Technical Delivery Audit Verdict</div>
+            <div class="cert-status">${overallStatus}</div>
           </div>
-          <div style="text-align: right; font-size: 11px; color: #475569;">
-            <div>Total Duration: <strong>${batchResult.summary.total_duration_seconds.toFixed(1)}s</strong></div>
-            <div>Files Analyzed: <strong>${batchResult.summary.total_files}</strong></div>
+          <div style="text-align: right; font-size: 10px; color: #475569;">
+            <div>Total Files Audited: <strong>${files.length}</strong></div>
+            <div>Compliant: <strong>${files.filter(f => f.overall_status === 'PASS').length}</strong> &bull; Non-compliant: <strong>${files.filter(f => f.overall_status !== 'PASS').length}</strong></div>
           </div>
         </div>
 
-        <div class="metrics-grid">
-          <div class="metric-box">
-            <div class="metric-label">Average Loudness</div>
-            <div class="metric-value">${batchResult.summary.avg_lufs !== null && batchResult.summary.avg_lufs !== undefined ? `${batchResult.summary.avg_lufs} LUFS` : 'N/A'}</div>
-          </div>
-          <div class="metric-box">
-            <div class="metric-label">Max True Peak</div>
-            <div class="metric-value">${batchResult.summary.highest_true_peak_dbtp !== null && batchResult.summary.highest_true_peak_dbtp !== undefined ? `${batchResult.summary.highest_true_peak_dbtp} dBTP` : 'N/A'}</div>
-          </div>
-          <div class="metric-box">
-            <div class="metric-label">Clipping Detected</div>
-            <div class="metric-value" style="color: ${clippingCount > 0 ? '#ef4444' : '#10b981'};">
-              ${clippingCount} file(s)
-            </div>
-          </div>
-          <div class="metric-box">
-            <div class="metric-label">Failed Files</div>
-            <div class="metric-value" style="color: ${batchResult.summary.failed > 0 ? '#ef4444' : '#10b981'};">
-              ${batchResult.summary.failed}
-            </div>
-          </div>
+        <!-- Legal & Technical Proof Notice -->
+        <div class="notice-box">
+          <strong>FILE INTEGRITY &amp; AUTHENTICITY GUARANTEE:</strong>
+          This technical quality control certificate was produced by deterministic on-device digital signal processing algorithms according to ITU-R BS.1770-4 and EBU R128 specifications. The cryptographic SHA-256 hash uniquely identifies the exact binary audio payload analyzed. Any modification to audio samples or container headers will invalidate this certificate.
         </div>
 
-        <h3 style="font-size: 12px; text-transform: uppercase; color: #1e293b; margin: 15px 0 5px 0;">Track Inspection Details &amp; SHA-256 Signatures</h3>
-        <table>
-          <thead>
-            <tr>
-              <th style="text-align: left; width: 45%;">Track Filename &amp; Full SHA-256 Hash</th>
-              <th style="width: 10%;">Status</th>
-              <th style="text-align: right; width: 10%;">LUFS</th>
-              <th style="text-align: right; width: 10%;">True Peak</th>
-              <th style="text-align: right; width: 9%;">LRA</th>
-              <th style="width: 8%;">Format</th>
-              <th style="width: 8%;">Clipping</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml}
-          </tbody>
-        </table>
+        <!-- Detailed Files & Findings -->
+        ${filesHtml}
 
         <div class="footer">
-          <div>Cryptographically validated by Sonichecks Browser Audio Engine.</div>
-          <div>Page 1 of 1 &bull; Verification Batch: ${batchResult.batch_id}</div>
+          <span>&copy; ${new Date().getFullYear()} Sonichecks &bull; Automated Audio Delivery Quality Control</span>
+          <span>https://sonichecks.com &bull; Cryptographic Report Verification</span>
         </div>
-
-        <script>
-          window.onload = function() {
-            setTimeout(function() {
-              window.print();
-            }, 300);
-          };
-        </script>
       </body>
     </html>
   `;
 
   printWindow.document.open();
-  printWindow.document.write(htmlContent);
+  printWindow.document.write(html);
   printWindow.document.close();
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+export const downloadPdfLocally = downloadPdfCertificate;

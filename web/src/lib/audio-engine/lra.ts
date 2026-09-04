@@ -13,6 +13,7 @@ export interface LraResult {
   loudnessRangeLu: number | null;
   shortTermPoints: ShortTermPoint[];
   shortTermMaxLufs: number | null;
+  shortTermMaxTimestampSec?: number | null;
   shortTermMinLufs: number | null;
 }
 
@@ -95,6 +96,7 @@ export function calculateLoudnessRange(
   const timelinePoints: ShortTermPoint[] = [];
 
   let maxShortTerm = -100.0;
+  let maxShortTermTime: number | null = null;
   let minShortTerm = 100.0;
 
   for (let j = 0; j < numBlocks; j++) {
@@ -128,7 +130,10 @@ export function calculateLoudnessRange(
 
     // Track short term max and min across all sliding positions fully within audio
     if (u <= numSamples) {
-      if (blockLufs > maxShortTerm) maxShortTerm = blockLufs;
+      if (blockLufs > maxShortTerm) {
+        maxShortTerm = blockLufs;
+        maxShortTermTime = l / sampleRate;
+      }
       if (blockLufs < minShortTerm && blockLufs > -70.0) minShortTerm = blockLufs;
     }
 
@@ -170,6 +175,7 @@ export function calculateLoudnessRange(
       loudnessRangeLu: 0.0,
       shortTermPoints: timelinePoints,
       shortTermMaxLufs: maxShortTerm > -100 ? Math.round(maxShortTerm * 100) / 100 : null,
+      shortTermMaxTimestampSec: maxShortTermTime,
       shortTermMinLufs: minShortTerm < 100 ? Math.round(minShortTerm * 100) / 100 : null
     };
   }
@@ -186,6 +192,7 @@ export function calculateLoudnessRange(
     loudnessRangeLu,
     shortTermPoints: timelinePoints,
     shortTermMaxLufs: maxShortTerm > -100 ? Math.round(maxShortTerm * 100) / 100 : null,
+    shortTermMaxTimestampSec: maxShortTermTime,
     shortTermMinLufs: minShortTerm < 100 ? Math.round(minShortTerm * 100) / 100 : null
   };
 }
