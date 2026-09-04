@@ -16,7 +16,14 @@ export function getAdminFirestore(): Firestore | null {
       let privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
       if (privateKey) {
-        // Fix newline escaping in private key string
+        // Robust handling for Vercel environment variables: strip quotes and convert escaped newlines
+        privateKey = privateKey.trim();
+        if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+          privateKey = privateKey.slice(1, -1);
+        }
+        if (privateKey.startsWith("'") && privateKey.endsWith("'")) {
+          privateKey = privateKey.slice(1, -1);
+        }
         privateKey = privateKey.replace(/\\n/g, '\n');
       }
 
