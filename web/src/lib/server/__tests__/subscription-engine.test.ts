@@ -225,7 +225,37 @@ export async function runSubscriptionTimelineTests() {
     console.log('  ✅ Test 7: Subscription cancellation & active access retention until cycle end passed');
   }
 
-  console.log('\n🎉 ALL 7 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
+  // 8. Test Active Pro Subscriber Mid-Cycle Upgrade to Studio
+  {
+    const email = 'active_pro_to_studio@example.com';
+    // 1. User is active Pro
+    await getOrSyncUserSubscription(email, {
+      forcePlan: 'pro',
+      overrideAdminDb: mockDb
+    });
+    // Check some files on Pro
+    await recordBackendUploadEvent(email, 25, { overrideAdminDb: mockDb });
+
+    // 2. User purchases Studio upgrade
+    const studioUpgrade = await getOrSyncUserSubscription(email, {
+      forcePlan: 'studio',
+      overrideAdminDb: mockDb
+    });
+
+    assert(studioUpgrade.plan === 'studio', 'Plan must immediately upgrade to studio');
+    assert(studioUpgrade.tier === 'STUDIO', 'Tier must be STUDIO');
+    assert(studioUpgrade.monthlyAllowance === -1, 'Studio allowance must be -1 unlimited');
+    assert(studioUpgrade.filesChecked === 0, 'Quota must reset on upgrade');
+    assert(studioUpgrade.status === 'active', 'Status must be active');
+
+    // 3. User subsequent getOrSync returns studio
+    const synced = await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+    assert(synced.plan === 'studio', 'Subsequent sync must maintain Studio plan');
+    assert(synced.monthlyAllowance === -1, 'Subsequent sync must maintain unlimited quota');
+    console.log('  ✅ Test 8: Active Pro subscriber immediate mid-cycle upgrade to Studio passed');
+  }
+
+  console.log('\n🎉 ALL 8 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
 }
 
 if (typeof process !== 'undefined' && process.argv && process.argv[1]?.includes('subscription-engine.test')) {

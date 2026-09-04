@@ -27,6 +27,28 @@ export interface UserSubscriptionRecord {
 }
 
 const CREEM_API_KEY = process.env.CREEM_API_KEY || 'creem_test_3p3jA5JhzxAB8AEd3E8rP7';
+const CREEM_PRODUCT_PRO = process.env.CREEM_PRODUCT_PRO || 'prod_403pcqlci8ftt5NDEoMgUm';
+const CREEM_PRODUCT_STUDIO = process.env.CREEM_PRODUCT_STUDIO || 'prod_5ET7sC2HVVNfakcDtgMPaL';
+
+/**
+ * Accurately determines if a Creem record belongs to Studio or Pro plan.
+ */
+export function determineCreemPlan(item: any): 'studio' | 'pro' {
+  if (!item) return 'pro';
+  const prodId = String(item.product_id || item.productId || item.product || item.product_tier || '').toLowerCase();
+  const prodName = String(item.product_name || item.name || item.description || item.title || item.plan || '').toLowerCase();
+  const amount = Number(item.amount || item.price || item.unit_amount || item.total_amount || 0);
+
+  if (
+    prodId === CREEM_PRODUCT_STUDIO.toLowerCase() ||
+    prodId.includes('studio') ||
+    prodName.includes('studio') ||
+    amount >= 1400 // €14.99 in cents
+  ) {
+    return 'studio';
+  }
+  return 'pro';
+}
 
 /**
  * Get standard monthly file quota per plan.
@@ -54,26 +76,67 @@ export async function checkCreemSubscription(email: string): Promise<{
   try {
     const isTest = CREEM_API_KEY.startsWith('creem_test_');
     const apiBase = isTest ? 'https://test-api.creem.io' : 'https://api.creem.io';
+    const cleanEmail = email.toLowerCase().trim();
     
-    const res = await fetch(`${apiBase}/v1/customers?email=${encodeURIComponent(email.toLowerCase())}`, {
-      headers: { 'x-api-key': CREEM_API_KEY }
-    });
+    let activeCustomer: any = null;
+    let activeSubscription: any = null;
 
-    if (!res.ok) {
-      return { isActive: false, plan: null, customerId: null, subscriptionId: null, expiresAt: null };
+    // 1. Query subscriptions endpoint
+    try {
+      const subRes = await fetch(`${apiBase}/v1/subscriptions?email=${encodeURIComponent(cleanEmail)}`, {
+        headers: { 'x-api-key': CREEM_API_KEY }
+      });
+      if (subRes.ok) {
+        const subData = await subRes.json();
+        const subs = Array.isArray(subData) ? subData : (subData?.items || subData?.data || (subData?.id ? [subData] : []));
+        if (subs.length > 0) {
+          // Prioritize active Studio subscription first
+          const studioSub = subs.find((s: any) => determineCreemPlan(s) === 'studio' && s.status !== 'canceled' && s.status !== 'expired');
+          const validSub = studioSub || subs.find((s: any) => s.status !== 'canceled' && s.status !== 'expired') || subs[0];
+          if (validSub) {
+            activeSubscription = validSub;
+          }
+        }
+      }
+    } catch (subErr) {
+      console.warn('Creem subscription lookup notice:', subErr);
     }
 
-    const data = await res.json();
-    if (data && (data.id || (Array.isArray(data) && data.length > 0))) {
-      const cust = Array.isArray(data) ? data[0] : data;
+    // 2. Query customers endpoint
+    try {
+      const res = await fetch(`${apiBase}/v1/customers?email=${encodeURIComponent(cleanEmail)}`, {
+        headers: { 'x-api-key': CREEM_API_KEY }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && (data.id || (Array.isArray(data) && data.length > 0))) {
+          const custs = Array.isArray(data) ? data : [data];
+          const studioCust = custs.find((c: any) => determineCreemPlan(c) === 'studio');
+          activeCustomer = studioCust || custs[0];
+        }
+      }
+    } catch (custErr) {
+      console.warn('Creem customer lookup notice:', custErr);
+    }
+
+    const matchedRecord = activeSubscription || activeCustomer;
+    if (matchedRecord) {
+      let plan = determineCreemPlan(matchedRecord);
+      if (activeSubscription && determineCreemPlan(activeSubscription) === 'studio') {
+        plan = 'studio';
+      } else if (activeCustomer && determineCreemPlan(activeCustomer) === 'studio') {
+        plan = 'studio';
+      }
+
       return {
         isActive: true,
-        plan: cust.product_id?.includes('studio') ? 'studio' : 'pro',
-        customerId: cust.id || null,
-        subscriptionId: cust.subscription_id || null,
-        expiresAt: cust.current_period_end || null
+        plan,
+        customerId: activeCustomer?.id || activeSubscription?.customer_id || activeSubscription?.customer || null,
+        subscriptionId: activeSubscription?.id || activeCustomer?.subscription_id || activeCustomer?.subscription || null,
+        expiresAt: activeSubscription?.current_period_end || activeSubscription?.period_end || activeCustomer?.current_period_end || activeCustomer?.period_end || null
       };
     }
+
     return { isActive: false, plan: null, customerId: null, subscriptionId: null, expiresAt: null };
   } catch (e) {
     console.warn('Creem lookup error:', e);
@@ -223,25 +286,50 @@ export async function getOrSyncUserSubscription(
     resetDate = subscriptionEndDate;
     filesChecked = 0; // Reset on new plan activation
   } else {
-    // 3. Evaluate Timeline & Expiry
+    // 3. Evaluate Timeline, Expiry & Live Creem Status
     const endDateTime = new Date(subscriptionEndDate).getTime();
     const resetDateTime = new Date(resetDate).getTime();
 
-    if (plan !== 'free') {
-      // PAID PLAN: Check if subscription has expired
-      if (now.getTime() > endDateTime) {
-        // Check with Creem to see if renewed
-        const creemStatus = await checkCreemSubscription(cleanEmail);
-        if (creemStatus.isActive) {
-          // Renewed: advance timeline by 30 days
+    // Check Creem live status for active plan or upgrades
+    const creemStatus = await checkCreemSubscription(cleanEmail);
+
+    if (creemStatus.isActive && creemStatus.plan) {
+      if (creemStatus.customerId) creemCustomerId = creemStatus.customerId;
+      if (creemStatus.subscriptionId) creemSubscriptionId = creemStatus.subscriptionId;
+
+      const isUpgrade = plan === 'free' || (plan === 'pro' && creemStatus.plan === 'studio');
+
+      if (isUpgrade || status !== 'active') {
+        // Immediate plan upgrade or reactivation from Creem
+        plan = creemStatus.plan;
+        tier = plan.toUpperCase() as any;
+        status = 'active';
+        subscriptionStartDate = nowIso;
+        subscriptionEndDate = creemStatus.expiresAt || new Date(now.getTime() + thirtyDaysMs).toISOString();
+        resetDate = subscriptionEndDate;
+        filesChecked = 0; // Reset usage on plan upgrade
+      } else {
+        // Active on Creem with matching plan
+        plan = creemStatus.plan;
+        tier = plan.toUpperCase() as any;
+        status = 'active';
+
+        if (now.getTime() > endDateTime) {
+          // Renewed
           subscriptionStartDate = nowIso;
-          subscriptionEndDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
+          subscriptionEndDate = creemStatus.expiresAt || new Date(now.getTime() + thirtyDaysMs).toISOString();
           resetDate = subscriptionEndDate;
           filesChecked = 0;
-          status = 'active';
-          if (creemStatus.plan) plan = creemStatus.plan;
-          tier = plan.toUpperCase() as any;
-        } else {
+        } else if (now.getTime() >= resetDateTime) {
+          // Monthly quota rollover
+          filesChecked = 0;
+          resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
+        }
+      }
+    } else {
+      // Creem returned not active / Free user
+      if (plan !== 'free') {
+        if (now.getTime() > endDateTime) {
           // EXPIRED: Automatically downgrade to Free plan
           plan = 'free';
           tier = 'FREE';
@@ -250,21 +338,19 @@ export async function getOrSyncUserSubscription(
           subscriptionEndDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
           resetDate = subscriptionEndDate;
           filesChecked = 0;
-        }
-      } else {
-        // Active Paid Period: Check if resetDate has passed for quota rollover
-        if (now.getTime() >= resetDateTime) {
+        } else if (now.getTime() >= resetDateTime) {
+          // Active paid period rollover
           filesChecked = 0;
           resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
         }
-      }
-    } else {
-      // FREE PLAN: 30-day rolling quota reset
-      if (now.getTime() >= resetDateTime) {
-        filesChecked = 0;
-        subscriptionStartDate = nowIso;
-        subscriptionEndDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
-        resetDate = subscriptionEndDate;
+      } else {
+        // FREE PLAN: 30-day rolling quota reset
+        if (now.getTime() >= resetDateTime) {
+          filesChecked = 0;
+          subscriptionStartDate = nowIso;
+          subscriptionEndDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
+          resetDate = subscriptionEndDate;
+        }
       }
     }
   }

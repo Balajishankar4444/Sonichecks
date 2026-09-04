@@ -64,15 +64,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const localUsage = getUsageState(u.email);
       const clientFilesChecked = localUsage.filesChecked;
 
+      let pendingPlan: 'pro' | 'studio' | null = null;
+      if (typeof window !== 'undefined') {
+        pendingPlan = sessionStorage.getItem('sonichecks_pending_plan_sync') as any;
+      }
+
       const res = await fetch('/api/user/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: u.email,
           displayName: u.displayName,
+          forcePlan: pendingPlan || undefined,
           clientFilesChecked
         })
       });
+
+      if (pendingPlan && typeof window !== 'undefined') {
+        try { sessionStorage.removeItem('sonichecks_pending_plan_sync'); } catch (e) {}
+      }
+
       if (res.ok) {
         const data = await res.json();
         if (data.plan) {

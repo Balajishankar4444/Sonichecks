@@ -42,7 +42,7 @@ import { loadCustomProfiles, deleteCustomProfile } from '@/lib/storage/custom-pr
 import CustomProfileModal from '@/components/qc/CustomProfileModal';
 
 export default function DashboardPage() {
-  const { user, openAuthModal, loading: authLoading } = useAuth();
+  const { user, openAuthModal, loading: authLoading, setUserPlan } = useAuth();
   const [history, setHistory] = useState<BatchQCResult[]>([]);
   const [usage, setUsage] = useState<UsageState | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -79,6 +79,9 @@ export default function DashboardPage() {
         const data = await res.json();
         if (data.success && data.plan && (data.plan === 'pro' || data.plan === 'studio')) {
           updatePlan(data.plan, targetEmail);
+          if (user && user.plan !== data.plan) {
+            setUserPlan(data.plan);
+          }
           refreshState(targetEmail);
           if (showNotification) {
             setSyncMessage(`🎉 Verified: ${data.plan.toUpperCase()} plan is active for ${targetEmail}!`);
@@ -103,15 +106,34 @@ export default function DashboardPage() {
       const planParam = urlParams.get('plan')?.toLowerCase();
 
       if (paymentStatus === 'success' && (planParam === 'pro' || planParam === 'studio')) {
-        updatePlan(planParam as 'pro' | 'studio', user?.email || undefined);
-        setSyncMessage(`🎉 Payment Verified! Your ${planParam.toUpperCase()} subscription is now active.`);
+        const verifiedPlan = planParam as 'pro' | 'studio';
+        sessionStorage.setItem('sonichecks_pending_plan_sync', verifiedPlan);
+        updatePlan(verifiedPlan, user?.email || undefined);
+        setUserPlan(verifiedPlan);
+        setSyncMessage(`🎉 Payment Verified! Your ${verifiedPlan.toUpperCase()} subscription is now active.`);
         refreshState(user?.email || undefined);
         window.history.replaceState({}, '', window.location.pathname);
       }
     }
 
     if (user?.email) {
-      syncSubscriptionWithServer(user.email, false);
+      const pendingPlan = typeof window !== 'undefined' ? (sessionStorage.getItem('sonichecks_pending_plan_sync') as 'pro' | 'studio' | null) : null;
+      if (pendingPlan) {
+        sessionStorage.removeItem('sonichecks_pending_plan_sync');
+        fetch('/api/subscription/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: user.email, plan: pendingPlan })
+        }).then(res => res.json()).then(data => {
+          if (data.success && data.plan) {
+            updatePlan(data.plan, user.email || undefined);
+            setUserPlan(data.plan);
+            refreshState(user.email || undefined);
+          }
+        }).catch(console.warn);
+      } else {
+        syncSubscriptionWithServer(user.email, false);
+      }
     }
 
     const handlePlanUpdate = () => refreshState(user?.email || undefined);
