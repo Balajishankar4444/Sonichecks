@@ -255,7 +255,27 @@ export async function runSubscriptionTimelineTests() {
     console.log('  ✅ Test 8: Active Pro subscriber immediate mid-cycle upgrade to Studio passed');
   }
 
-  console.log('\n🎉 ALL 8 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
+  // 9. Test Studio Subscription Renewal & Continuation (Never downgrades to Pro or Free while continuing)
+  {
+    const email = 'studio_continuing_user@example.com';
+    // User is on active Studio
+    await getOrSyncUserSubscription(email, {
+      forcePlan: 'studio',
+      overrideAdminDb: mockDb
+    });
+
+    // Simulate multi-month syncs
+    const sync1 = await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+    assert(sync1.plan === 'studio', 'Studio subscriber must stay on Studio plan');
+    assert(sync1.tier === 'STUDIO', 'Tier must remain STUDIO');
+    assert(sync1.monthlyAllowance === -1, 'Studio quota remains unlimited');
+
+    const sync2 = await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+    assert(sync2.plan === 'studio', 'Subsequent billing checks must never downgrade Studio to Pro');
+    console.log('  ✅ Test 9: Continuous Studio plan retention across billing cycles passed');
+  }
+
+  console.log('\n🎉 ALL 9 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
 }
 
 if (typeof process !== 'undefined' && process.argv && process.argv[1]?.includes('subscription-engine.test')) {

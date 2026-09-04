@@ -294,69 +294,43 @@ export async function getOrSyncUserSubscription(
     // Check Creem live status for active plan or upgrades
     const creemStatus = await checkCreemSubscription(cleanEmail);
 
-    if (creemStatus.isActive && creemStatus.plan) {
+    if (creemStatus.isActive) {
       if (creemStatus.customerId) creemCustomerId = creemStatus.customerId;
       if (creemStatus.subscriptionId) creemSubscriptionId = creemStatus.subscriptionId;
 
-      const isCreemUpgrade = (plan === 'free') || (plan === 'pro' && creemStatus.plan === 'studio');
+      // 1. Studio preservation & upgrade rule: if Creem is Studio or current plan is Studio, stay Studio
+      if (creemStatus.plan === 'studio' || plan === 'studio') {
+        plan = 'studio';
+        tier = 'STUDIO';
+      } else if (creemStatus.plan === 'pro' || plan === 'pro') {
+        plan = 'pro';
+        tier = 'PRO';
+      }
 
-      if (isCreemUpgrade || status !== 'active') {
-        // Immediate plan upgrade or reactivation from Creem
-        plan = creemStatus.plan;
-        tier = plan.toUpperCase() as any;
-        status = 'active';
+      status = 'active';
+
+      if (!isWithinActiveCycle) {
+        // Renewed monthly billing cycle: advance by 30 days and reset monthly quota
         subscriptionStartDate = nowIso;
         subscriptionEndDate = creemStatus.expiresAt || new Date(now.getTime() + thirtyDaysMs).toISOString();
         resetDate = subscriptionEndDate;
-        filesChecked = 0; // Reset usage on plan upgrade
-      } else if (plan === 'studio' && isWithinActiveCycle) {
-        // User is currently on active Studio: preserve Studio tier!
-        plan = 'studio';
-        tier = 'STUDIO';
-        status = 'active';
-        if (now.getTime() >= resetDateTime) {
-          filesChecked = 0;
-          resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
-        }
-      } else {
-        // Active on Creem with matching plan
-        if (!isWithinActiveCycle) {
-          // Cycle was expired and now renewed
-          plan = creemStatus.plan;
-          tier = plan.toUpperCase() as any;
-          status = 'active';
-          subscriptionStartDate = nowIso;
-          subscriptionEndDate = creemStatus.expiresAt || new Date(now.getTime() + thirtyDaysMs).toISOString();
-          resetDate = subscriptionEndDate;
-          filesChecked = 0;
-        } else {
-          // Active period quota rollover check
-          if (now.getTime() >= resetDateTime) {
-            filesChecked = 0;
-            resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
-          }
-        }
+        filesChecked = 0;
+      } else if (now.getTime() >= resetDateTime) {
+        // Active monthly quota rollover
+        filesChecked = 0;
+        resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
       }
     } else {
       // Creem returned not active / Free user
-      if (plan === 'studio' && isWithinActiveCycle) {
-        // Retain Studio for the duration of the active paid cycle
-        plan = 'studio';
-        tier = 'STUDIO';
-        if (now.getTime() >= resetDateTime) {
-          filesChecked = 0;
-          resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
-        }
-      } else if (plan === 'pro' && isWithinActiveCycle) {
-        // Retain Pro for the duration of the active paid cycle
-        plan = 'pro';
-        tier = 'PRO';
+      if (isWithinActiveCycle && plan !== 'free' && status !== 'expired') {
+        // Retain current paid tier (Studio or Pro) until the active paid period finishes
+        tier = plan.toUpperCase() as any;
         if (now.getTime() >= resetDateTime) {
           filesChecked = 0;
           resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
         }
       } else if (plan !== 'free') {
-        // EXPIRED: Automatically downgrade to Free plan
+        // SUBSCRIPTION STOPPED / EXPIRED: Automatically transition to Free plan
         plan = 'free';
         tier = 'FREE';
         status = 'expired';
