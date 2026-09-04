@@ -172,7 +172,7 @@ export async function runSubscriptionTimelineTests() {
     assert(evaluated.status === 'expired', 'Status must be expired');
     assert(evaluated.monthlyAllowance === 5, 'Allowance must be reset to 5 files');
     assert(evaluated.filesChecked === 0, 'New free period filesChecked must be 0');
-    assert(new Date(evaluated.subscriptionEndDate).getTime() > Date.now(), 'Must set new 30-day free timeline');
+    assert(evaluated.daysRemaining === 0, 'Expired subscription must have 0 days remaining');
     console.log('  ✅ Test 5: Automatic downgrade from expired paid plan to Free plan passed');
   }
 
@@ -362,7 +362,38 @@ export async function runSubscriptionTimelineTests() {
     console.log('  ✅ Test 12: Client Firestore fallback synchronization passed');
   }
 
-  console.log('\n🎉 ALL 12 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
+  // 13. Test Creem Customer Manual Expiration Testing in Firestore
+  {
+    const email = 'creem_customer_expiration_tester@example.com';
+    const pastEndDate = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5 mins in the past
+    const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const usersCol = mockDb.collection('users');
+    await usersCol.doc(email).set({
+      email,
+      plan: 'studio',
+      tier: 'STUDIO',
+      status: 'active',
+      creemCustomerId: 'cust_6WrfMnHRZu14fraCyHcIwQ',
+      creemSubscriptionId: null,
+      subscriptionStartDate: startDate,
+      subscriptionEndDate: pastEndDate,
+      resetDate: pastEndDate,
+      filesChecked: 15,
+      monthlyAllowance: -1,
+      registeredAt: startDate
+    });
+
+    const evaluated = await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+    assert(evaluated.plan === 'free', `Expected plan 'free' on expired test date, got '${evaluated.plan}'`);
+    assert(evaluated.tier === 'FREE', `Expected tier 'FREE', got '${evaluated.tier}'`);
+    assert(evaluated.status === 'expired', `Expected status 'expired', got '${evaluated.status}'`);
+    assert(evaluated.daysRemaining === 0, `Expected daysRemaining 0, got ${evaluated.daysRemaining}`);
+    assert(evaluated.monthlyAllowance === 5, `Expected monthlyAllowance 5, got ${evaluated.monthlyAllowance}`);
+    console.log('  ✅ Test 13: Creem customer manual expiration testing passed');
+  }
+
+  console.log('\n🎉 ALL 13 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
 }
 
 if (typeof process !== 'undefined' && process.argv && process.argv[1]?.includes('subscription-engine.test')) {

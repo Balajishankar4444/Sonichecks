@@ -52,16 +52,20 @@ export async function syncUserWithFirestore(
     if (snap.exists()) {
       const data = snap.data() as Partial<FirestoreUserProfile>;
       
-      const plan = data.plan || 'free';
-      const status = data.status || 'active';
+      const rawPlan = data.plan || 'free';
       const subscriptionStartDate = data.subscriptionStartDate || data.createdAt || nowIso;
       const subscriptionEndDate = data.subscriptionEndDate;
       const resetDate = data.resetDate || subscriptionEndDate;
       const filesChecked = data.filesChecked ?? 0;
-      const monthlyAllowance = data.monthlyAllowance ?? (plan === 'studio' ? 999999 : plan === 'pro' ? 100 : 5);
 
-      let daysRemaining: number | undefined = undefined;
-      if (subscriptionEndDate) {
+      const isExpired = subscriptionEndDate ? new Date(subscriptionEndDate).getTime() <= Date.now() : false;
+      const plan = isExpired ? 'free' : rawPlan;
+      const tier = (plan.toUpperCase() as any);
+      const status = isExpired ? 'expired' : (data.status || 'active');
+      const monthlyAllowance = isExpired ? 5 : (data.monthlyAllowance ?? (plan === 'studio' ? 999999 : plan === 'pro' ? 100 : 5));
+
+      let daysRemaining = 0;
+      if (subscriptionEndDate && !isExpired) {
         const endMs = new Date(subscriptionEndDate).getTime();
         daysRemaining = Math.max(0, Math.ceil((endMs - Date.now()) / (1000 * 60 * 60 * 24)));
       }
@@ -69,7 +73,7 @@ export async function syncUserWithFirestore(
       resultProfile = {
         ...data,
         plan,
-        tier: (plan.toUpperCase() as any),
+        tier,
         status,
         subscriptionStartDate,
         subscriptionEndDate,
@@ -129,9 +133,18 @@ export async function syncUserWithFirestore(
       if (docSnap.exists()) {
         const liveData = docSnap.data() as Partial<FirestoreUserProfile>;
         if (liveData) {
-          const livePlan = liveData.plan || 'free';
-          let liveDaysRemaining: number | undefined = undefined;
-          if (liveData.subscriptionEndDate) {
+          const rawLivePlan = liveData.plan || 'free';
+          const isLiveExpired = liveData.subscriptionEndDate 
+            ? new Date(liveData.subscriptionEndDate).getTime() <= Date.now() 
+            : false;
+
+          const livePlan = isLiveExpired ? 'free' : rawLivePlan;
+          const liveTier = (livePlan.toUpperCase() as any);
+          const liveStatus = isLiveExpired ? 'expired' : (liveData.status || 'active');
+          const liveMonthlyAllowance = isLiveExpired ? 5 : (livePlan === 'studio' ? 999999 : livePlan === 'pro' ? 100 : 5);
+
+          let liveDaysRemaining = 0;
+          if (liveData.subscriptionEndDate && !isLiveExpired) {
             const endMs = new Date(liveData.subscriptionEndDate).getTime();
             liveDaysRemaining = Math.max(0, Math.ceil((endMs - Date.now()) / (1000 * 60 * 60 * 24)));
           }
@@ -139,8 +152,10 @@ export async function syncUserWithFirestore(
           const updated: Partial<FirestoreUserProfile> = {
             ...liveData,
             plan: livePlan,
-            tier: (livePlan.toUpperCase() as any),
-            daysRemaining: liveDaysRemaining
+            tier: liveTier,
+            status: liveStatus,
+            daysRemaining: liveDaysRemaining,
+            monthlyAllowance: liveMonthlyAllowance
           };
 
           updatePlan(livePlan, user.email || undefined);

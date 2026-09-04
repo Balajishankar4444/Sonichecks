@@ -369,34 +369,57 @@ export async function getOrSyncUserSubscription(
       if (creemStatus.customerId) creemCustomerId = creemStatus.customerId;
       if (creemStatus.subscriptionId) creemSubscriptionId = creemStatus.subscriptionId;
 
-      // Studio preservation & upgrade rule
-      if (creemStatus.plan === 'studio' || plan === 'studio') {
-        plan = 'studio';
-        tier = 'STUDIO';
-      } else if (creemStatus.plan === 'pro' || plan === 'pro') {
-        plan = 'pro';
-        tier = 'PRO';
-      }
-
-      status = 'active';
-
       if (!isWithinActiveCycle) {
-        // Renewed monthly billing cycle: only advance if Creem gives a future expiry or no manual test date was set
+        // Expired cycle: only stay active/renew if Creem gives a genuine future expiry or no manual test date was specified
         if (creemStatus.expiresAt && new Date(creemStatus.expiresAt).getTime() > now.getTime()) {
+          if (creemStatus.plan === 'studio' || plan === 'studio') {
+            plan = 'studio';
+            tier = 'STUDIO';
+          } else {
+            plan = 'pro';
+            tier = 'PRO';
+          }
+          status = 'active';
           subscriptionStartDate = nowIso;
           subscriptionEndDate = creemStatus.expiresAt;
           resetDate = subscriptionEndDate;
           filesChecked = 0;
         } else if (!hasExplicitEndDate) {
+          if (creemStatus.plan === 'studio' || plan === 'studio') {
+            plan = 'studio';
+            tier = 'STUDIO';
+          } else {
+            plan = 'pro';
+            tier = 'PRO';
+          }
+          status = 'active';
           subscriptionStartDate = nowIso;
           subscriptionEndDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
           resetDate = subscriptionEndDate;
           filesChecked = 0;
+        } else {
+          // Explicit manual test date set to the past in Firestore: transition to expired Free
+          plan = 'free';
+          tier = 'FREE';
+          status = 'expired';
+          filesChecked = 0;
         }
-      } else if (now.getTime() >= resetDateTime) {
-        // Active monthly quota rollover
-        filesChecked = 0;
-        resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
+      } else {
+        // Within active cycle
+        if (creemStatus.plan === 'studio' || plan === 'studio') {
+          plan = 'studio';
+          tier = 'STUDIO';
+        } else if (creemStatus.plan === 'pro' || plan === 'pro') {
+          plan = 'pro';
+          tier = 'PRO';
+        }
+        status = 'active';
+
+        if (now.getTime() >= resetDateTime) {
+          // Active monthly quota rollover
+          filesChecked = 0;
+          resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
+        }
       }
     } else {
       // Creem returned not active / Free user / Manual testing mode
@@ -408,28 +431,26 @@ export async function getOrSyncUserSubscription(
           resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
         }
       } else if (plan !== 'free') {
-        // SUBSCRIPTION STOPPED / EXPIRED: Automatically transition to Free plan with new 30-day timeline
+        // SUBSCRIPTION STOPPED / EXPIRED: Automatically transition to Free plan
         plan = 'free';
         tier = 'FREE';
         status = 'expired';
-        subscriptionStartDate = nowIso;
-        subscriptionEndDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
-        resetDate = subscriptionEndDate;
         filesChecked = 0;
       } else {
         // FREE PLAN: 30-day rolling quota reset
         if (now.getTime() >= resetDateTime) {
           filesChecked = 0;
-          subscriptionStartDate = nowIso;
-          subscriptionEndDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
-          resetDate = subscriptionEndDate;
+          resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
         }
       }
     }
   }
 
   const monthlyAllowance = getPlanAllowance(plan);
-  const daysRemaining = Math.max(0, Math.ceil((new Date(subscriptionEndDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+  const isPastEnd = now.getTime() >= new Date(subscriptionEndDate).getTime();
+  const daysRemaining = (status === 'expired' || isPastEnd) 
+    ? 0 
+    : Math.max(0, Math.ceil((new Date(subscriptionEndDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
 
   const fullRecord: UserSubscriptionRecord = {
     email: cleanEmail,
