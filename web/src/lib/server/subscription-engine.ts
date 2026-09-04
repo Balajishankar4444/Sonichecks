@@ -283,6 +283,7 @@ export async function getOrSyncUserSubscription(
     forcePlan?: 'free' | 'pro' | 'studio';
     overrideAdminDb?: Firestore | null;
     clientFilesChecked?: number;
+    clientData?: Partial<UserSubscriptionRecord>;
   }
 ): Promise<UserSubscriptionRecord> {
   const cleanEmail = email.trim().toLowerCase();
@@ -306,6 +307,15 @@ export async function getOrSyncUserSubscription(
       console.warn('Firestore fetch notice:', dbErr);
     }
   }
+
+  // Fallback or merge with clientData (useful for direct client Firestore sync or dev testing)
+  if (!existingData && options?.clientData) {
+    existingData = options.clientData;
+  } else if (existingData && options?.clientData) {
+    existingData = { ...options.clientData, ...existingData };
+  }
+
+  const hasExplicitEndDate = !!existingData?.subscriptionEndDate;
 
   // 1. Initial defaults
   let plan: 'free' | 'pro' | 'studio' = existingData?.plan || 'free';
@@ -359,7 +369,7 @@ export async function getOrSyncUserSubscription(
       if (creemStatus.customerId) creemCustomerId = creemStatus.customerId;
       if (creemStatus.subscriptionId) creemSubscriptionId = creemStatus.subscriptionId;
 
-      // 1. Studio preservation & upgrade rule: if Creem is Studio or current plan is Studio, stay Studio
+      // Studio preservation & upgrade rule
       if (creemStatus.plan === 'studio' || plan === 'studio') {
         plan = 'studio';
         tier = 'STUDIO';
@@ -371,18 +381,25 @@ export async function getOrSyncUserSubscription(
       status = 'active';
 
       if (!isWithinActiveCycle) {
-        // Renewed monthly billing cycle: advance by 30 days and reset monthly quota
-        subscriptionStartDate = nowIso;
-        subscriptionEndDate = creemStatus.expiresAt || new Date(now.getTime() + thirtyDaysMs).toISOString();
-        resetDate = subscriptionEndDate;
-        filesChecked = 0;
+        // Renewed monthly billing cycle: only advance if Creem gives a future expiry or no manual test date was set
+        if (creemStatus.expiresAt && new Date(creemStatus.expiresAt).getTime() > now.getTime()) {
+          subscriptionStartDate = nowIso;
+          subscriptionEndDate = creemStatus.expiresAt;
+          resetDate = subscriptionEndDate;
+          filesChecked = 0;
+        } else if (!hasExplicitEndDate) {
+          subscriptionStartDate = nowIso;
+          subscriptionEndDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
+          resetDate = subscriptionEndDate;
+          filesChecked = 0;
+        }
       } else if (now.getTime() >= resetDateTime) {
         // Active monthly quota rollover
         filesChecked = 0;
         resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
       }
     } else {
-      // Creem returned not active / Free user
+      // Creem returned not active / Free user / Manual testing mode
       if (isWithinActiveCycle && plan !== 'free' && status !== 'expired') {
         // Retain current paid tier (Studio or Pro) until the active paid period finishes
         tier = plan.toUpperCase() as any;
@@ -391,7 +408,7 @@ export async function getOrSyncUserSubscription(
           resetDate = new Date(now.getTime() + thirtyDaysMs).toISOString();
         }
       } else if (plan !== 'free') {
-        // SUBSCRIPTION STOPPED / EXPIRED: Automatically transition to Free plan
+        // SUBSCRIPTION STOPPED / EXPIRED: Automatically transition to Free plan with new 30-day timeline
         plan = 'free';
         tier = 'FREE';
         status = 'expired';

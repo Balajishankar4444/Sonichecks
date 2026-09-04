@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
 import { db } from './firebase';
 import { updatePlan, getUsageState } from './storage';
 
@@ -6,49 +6,83 @@ export interface FirestoreUserProfile {
   uid: string;
   email: string | null;
   displayName?: string | null;
-  plan: 'free' | 'pro' | 'studio';
+  plan?: 'free' | 'pro' | 'studio';
+  tier?: 'FREE' | 'PRO' | 'STUDIO';
+  status?: 'active' | 'expired' | 'cancelled';
+  subscriptionStartDate?: string;
+  subscriptionEndDate?: string;
+  resetDate?: string;
+  daysRemaining?: number;
+  filesChecked?: number;
+  monthlyAllowance?: number;
   lastLoginAt: string;
-  createdAt: string;
+  createdAt?: string;
   updatedAt: string;
 }
 
 /**
- * Record user login time and fetch their subscription plan (Free, Pro, or Studio) from Firestore.
+ * Record user login time and fetch their full subscription data (plan, subscriptionEndDate, status, quota) from Firestore.
+ * Preserves whatever is manually edited in the Firebase console for seamless backend testing.
  */
 export async function syncUserWithFirestore(
   user: { uid: string; email: string | null; displayName?: string | null },
-  onPlanChanged?: (plan: 'free' | 'pro' | 'studio') => void
-): Promise<{ plan: 'free' | 'pro' | 'studio'; unsubscribe?: Unsubscribe }> {
+  onUserDataChanged?: (data: Partial<FirestoreUserProfile>) => void
+): Promise<{ profile: Partial<FirestoreUserProfile>; unsubscribe?: Unsubscribe }> {
   const nowIso = new Date().toISOString();
   const cleanEmail = user.email ? user.email.toLowerCase().trim() : null;
   const docId = cleanEmail || user.uid;
 
   if (!db || !docId) {
     const localUsage = getUsageState(user.email || undefined);
-    if (onPlanChanged) onPlanChanged(localUsage.plan);
-    return { plan: localUsage.plan };
+    const fallbackProfile: Partial<FirestoreUserProfile> = {
+      plan: localUsage.plan,
+      tier: localUsage.plan.toUpperCase() as any,
+      status: 'active'
+    };
+    if (onUserDataChanged) onUserDataChanged(fallbackProfile);
+    return { profile: fallbackProfile };
   }
 
   try {
     const userDocRef = doc(db, 'users', docId);
     const snap = await getDoc(userDocRef);
 
-    const localUsage = getUsageState(user.email || undefined);
-    let activePlan: 'free' | 'pro' | 'studio' = 'free';
+    let resultProfile: Partial<FirestoreUserProfile> = {};
 
     if (snap.exists()) {
-      const data = snap.data() as FirestoreUserProfile;
-      // Elevate to Studio if either Firestore or local state has Studio
-      if (localUsage.plan === 'studio' || data.plan === 'studio') {
-        activePlan = 'studio';
-      } else if (localUsage.plan === 'pro' || data.plan === 'pro') {
-        activePlan = 'pro';
-      } else {
-        activePlan = data.plan || 'free';
+      const data = snap.data() as Partial<FirestoreUserProfile>;
+      
+      const plan = data.plan || 'free';
+      const status = data.status || 'active';
+      const subscriptionStartDate = data.subscriptionStartDate || data.createdAt || nowIso;
+      const subscriptionEndDate = data.subscriptionEndDate;
+      const resetDate = data.resetDate || subscriptionEndDate;
+      const filesChecked = data.filesChecked ?? 0;
+      const monthlyAllowance = data.monthlyAllowance ?? (plan === 'studio' ? 999999 : plan === 'pro' ? 100 : 5);
+
+      let daysRemaining: number | undefined = undefined;
+      if (subscriptionEndDate) {
+        const endMs = new Date(subscriptionEndDate).getTime();
+        daysRemaining = Math.max(0, Math.ceil((endMs - Date.now()) / (1000 * 60 * 60 * 24)));
       }
 
+      resultProfile = {
+        ...data,
+        plan,
+        tier: (plan.toUpperCase() as any),
+        status,
+        subscriptionStartDate,
+        subscriptionEndDate,
+        resetDate,
+        daysRemaining,
+        filesChecked,
+        monthlyAllowance,
+        email: user.email || data.email,
+        displayName: user.displayName || data.displayName
+      };
+
+      // Only update login timestamp — NEVER overwrite subscription dates or plan set in Firebase
       await setDoc(userDocRef, {
-        plan: activePlan,
         lastLoginAt: nowIso,
         updatedAt: nowIso,
         email: user.email || data.email,
@@ -56,45 +90,81 @@ export async function syncUserWithFirestore(
       }, { merge: true }).catch(console.warn);
 
     } else {
-      activePlan = localUsage.plan !== 'free' ? localUsage.plan : 'free';
+      const localUsage = getUsageState(user.email || undefined);
+      const activePlan = localUsage.plan !== 'free' ? localUsage.plan : 'free';
+      const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+      const subscriptionEndDate = new Date(Date.now() + thirtyDaysMs).toISOString();
 
-      const newProfile: FirestoreUserProfile = {
+      resultProfile = {
         uid: user.uid,
         email: user.email,
         displayName: user.displayName || null,
         plan: activePlan,
+        tier: activePlan.toUpperCase() as any,
+        status: 'active',
+        subscriptionStartDate: nowIso,
+        subscriptionEndDate,
+        resetDate: subscriptionEndDate,
+        daysRemaining: 30,
+        filesChecked: 0,
+        monthlyAllowance: activePlan === 'studio' ? 999999 : activePlan === 'pro' ? 100 : 5,
         createdAt: nowIso,
         lastLoginAt: nowIso,
         updatedAt: nowIso
       };
 
-      await setDoc(userDocRef, newProfile, { merge: true }).catch(console.warn);
+      await setDoc(userDocRef, resultProfile, { merge: true }).catch(console.warn);
     }
 
-    // Sync to local storage
-    updatePlan(activePlan, user.email || undefined);
-    if (onPlanChanged) onPlanChanged(activePlan);
+    // Sync active plan to local storage
+    if (resultProfile.plan) {
+      updatePlan(resultProfile.plan, user.email || undefined);
+    }
+    if (onUserDataChanged) {
+      onUserDataChanged(resultProfile);
+    }
 
-    // Attach real-time Firestore snapshot listener
+    // Attach real-time Firestore snapshot listener so manual Firebase console edits reflect instantly
     const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
-        const liveData = docSnap.data() as FirestoreUserProfile;
-        if (liveData && liveData.plan) {
-          updatePlan(liveData.plan, user.email || undefined);
-          if (onPlanChanged) onPlanChanged(liveData.plan);
+        const liveData = docSnap.data() as Partial<FirestoreUserProfile>;
+        if (liveData) {
+          const livePlan = liveData.plan || 'free';
+          let liveDaysRemaining: number | undefined = undefined;
+          if (liveData.subscriptionEndDate) {
+            const endMs = new Date(liveData.subscriptionEndDate).getTime();
+            liveDaysRemaining = Math.max(0, Math.ceil((endMs - Date.now()) / (1000 * 60 * 60 * 24)));
+          }
+
+          const updated: Partial<FirestoreUserProfile> = {
+            ...liveData,
+            plan: livePlan,
+            tier: (livePlan.toUpperCase() as any),
+            daysRemaining: liveDaysRemaining
+          };
+
+          updatePlan(livePlan, user.email || undefined);
+          if (onUserDataChanged) {
+            onUserDataChanged(updated);
+          }
         }
       }
     }, (err) => {
-      console.warn('Firestore real-time plan listener notice:', err);
+      console.warn('Firestore real-time subscription listener notice:', err);
     });
 
-    return { plan: activePlan, unsubscribe };
+    return { profile: resultProfile, unsubscribe };
 
   } catch (err) {
     console.warn('Firestore sync notice:', err);
     const localUsage = getUsageState(user.email || undefined);
-    if (onPlanChanged) onPlanChanged(localUsage.plan);
-    return { plan: localUsage.plan };
+    const fallbackProfile: Partial<FirestoreUserProfile> = {
+      plan: localUsage.plan,
+      tier: localUsage.plan.toUpperCase() as any,
+      status: 'active'
+    };
+    if (onUserDataChanged) onUserDataChanged(fallbackProfile);
+    return { profile: fallbackProfile };
   }
 }
 

@@ -4,7 +4,7 @@ import { getOrSyncUserSubscription } from '@/lib/server/subscription-engine';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { email, displayName, forcePlan, clientFilesChecked } = body;
+    const { email, displayName, forcePlan, clientFilesChecked, clientData } = body;
 
     if (!email) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 });
@@ -13,7 +13,8 @@ export async function POST(req: NextRequest) {
     const record = await getOrSyncUserSubscription(email, {
       displayName,
       forcePlan,
-      clientFilesChecked: typeof clientFilesChecked === 'number' ? clientFilesChecked : undefined
+      clientFilesChecked: typeof clientFilesChecked === 'number' ? clientFilesChecked : undefined,
+      clientData
     });
 
     return NextResponse.json({

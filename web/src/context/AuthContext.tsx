@@ -57,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authSuccessCallback, setAuthSuccessCallback] = useState<(() => void) | null>(null);
 
-  const syncLoginWithServer = async (u: SonichecksUser) => {
+  const syncLoginWithServer = async (u: SonichecksUser, firestoreData?: Partial<SonichecksUser>) => {
     if (!u.email) return;
     try {
       // Calculate total files checked in the current month from history
@@ -76,7 +76,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email: u.email,
           displayName: u.displayName,
           forcePlan: pendingPlan || undefined,
-          clientFilesChecked
+          clientFilesChecked,
+          clientData: firestoreData || {
+            plan: u.plan,
+            status: u.status,
+            subscriptionStartDate: u.subscriptionStartDate,
+            subscriptionEndDate: u.subscriptionEndDate,
+            resetDate: u.resetDate,
+            filesChecked: u.filesChecked
+          }
         })
       });
 
@@ -138,6 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // 2. Listen to Firebase auth state and sync with Firestore
     let unsubscribeAuth = () => {};
+    let unsubscribeFirestore = () => {};
 
     if (auth) {
       try {
@@ -150,11 +159,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               lastLoginAt: new Date().toISOString()
             };
 
-            // Direct client Firestore sync with auth token
-            syncUserWithFirestore(u).catch(console.warn);
+            // Direct client Firestore sync with live listener
+            try {
+              const { profile, unsubscribe } = await syncUserWithFirestore(u, (liveData) => {
+                setUser((prev) => {
+                  if (!prev) return null;
+                  const merged = { ...prev, ...liveData };
+                  if (typeof window !== 'undefined') {
+                    localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(merged));
+                  }
+                  return merged;
+                });
+              });
+              if (unsubscribe) unsubscribeFirestore = unsubscribe;
 
-            await syncLoginWithServer(u);
-            setUser(u);
+              if (profile) {
+                Object.assign(u, profile);
+              }
+            } catch (fsErr) {
+              console.warn('Direct Firestore sync error:', fsErr);
+            }
+
+            await syncLoginWithServer(u, u);
+            setUser({ ...u });
 
             if (typeof window !== 'undefined') {
               localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(u));
@@ -176,6 +203,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       unsubscribeAuth();
+      unsubscribeFirestore();
     };
   }, []);
 

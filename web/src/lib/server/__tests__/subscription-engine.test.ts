@@ -308,7 +308,61 @@ export async function runSubscriptionTimelineTests() {
     console.log('  ✅ Test 10: Cancelled subscription cleanly transitions to Free after 30-day period ends passed');
   }
 
-  console.log('\n🎉 ALL 10 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
+  // 11. Test Custom Manual Firestore Date Preservation
+  {
+    const email = 'manual_firestore_tester@example.com';
+    const customFutureEnd = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
+    const startDate = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+
+    const usersCol = mockDb.collection('users');
+    await usersCol.doc(email).set({
+      email,
+      plan: 'studio',
+      tier: 'STUDIO',
+      status: 'active',
+      subscriptionStartDate: startDate,
+      subscriptionEndDate: customFutureEnd,
+      resetDate: customFutureEnd,
+      filesChecked: 12,
+      monthlyAllowance: -1,
+      registeredAt: startDate
+    });
+
+    const evaluated = await getOrSyncUserSubscription(email, { overrideAdminDb: mockDb });
+    assert(evaluated.plan === 'studio', 'Plan must remain studio');
+    assert(evaluated.subscriptionEndDate === customFutureEnd, 'Must preserve custom manual subscriptionEndDate from Firestore');
+    assert(evaluated.daysRemaining === 15, `daysRemaining should be 15, got ${evaluated.daysRemaining}`);
+    console.log('  ✅ Test 11: Manual Firestore subscriptionEndDate & plan preservation passed');
+  }
+
+  // 12. Test Client Data Fallback (when Admin DB is not initialized)
+  {
+    const email = 'client_fallback_tester@example.com';
+    const customFutureEnd = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+    const startDate = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
+
+    const evaluated = await getOrSyncUserSubscription(email, {
+      overrideAdminDb: null, // Simulate no server-side Firestore
+      clientData: {
+        email,
+        plan: 'pro',
+        tier: 'PRO',
+        status: 'active',
+        subscriptionStartDate: startDate,
+        subscriptionEndDate: customFutureEnd,
+        resetDate: customFutureEnd,
+        filesChecked: 5,
+        monthlyAllowance: 100
+      }
+    });
+
+    assert(evaluated.plan === 'pro', 'Must honor client Firestore plan');
+    assert(evaluated.subscriptionEndDate === customFutureEnd, 'Must honor client Firestore subscriptionEndDate');
+    assert(evaluated.daysRemaining === 10, `daysRemaining should be 10, got ${evaluated.daysRemaining}`);
+    console.log('  ✅ Test 12: Client Firestore fallback synchronization passed');
+  }
+
+  console.log('\n🎉 ALL 12 BACKEND SUBSCRIPTION & USAGE TIMELINE TESTS PASSED!\n');
 }
 
 if (typeof process !== 'undefined' && process.argv && process.argv[1]?.includes('subscription-engine.test')) {
