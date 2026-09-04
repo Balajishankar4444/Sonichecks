@@ -94,8 +94,17 @@ export async function checkCreemSubscription(email: string): Promise<{
         const chkData = await chkRes.json();
         const chks = Array.isArray(chkData) ? chkData : (chkData?.items || chkData?.data || (chkData?.id ? [chkData] : []));
         if (chks.length > 0) {
-          const studioChk = chks.find((c: any) => determineCreemPlan(c) === 'studio');
-          activeCheckout = studioChk || chks[0];
+          const validChks = chks.filter((c: any) => 
+            c.status !== 'canceled' && 
+            c.status !== 'cancelled' && 
+            c.status !== 'expired' &&
+            c.subscription_status !== 'canceled' &&
+            c.subscription_status !== 'cancelled'
+          );
+          if (validChks.length > 0) {
+            const studioChk = validChks.find((c: any) => determineCreemPlan(c) === 'studio');
+            activeCheckout = studioChk || validChks[0];
+          }
         }
       }
     } catch (chkErr) {
@@ -111,10 +120,17 @@ export async function checkCreemSubscription(email: string): Promise<{
         const subData = await subRes.json();
         const subs = Array.isArray(subData) ? subData : (subData?.items || subData?.data || (subData?.id ? [subData] : []));
         if (subs.length > 0) {
-          const studioSub = subs.find((s: any) => determineCreemPlan(s) === 'studio' && s.status !== 'canceled' && s.status !== 'expired');
-          const validSub = studioSub || subs.find((s: any) => s.status !== 'canceled' && s.status !== 'expired') || subs[0];
-          if (validSub) {
-            activeSubscription = validSub;
+          const validSubs = subs.filter((s: any) => 
+            s.status !== 'canceled' && 
+            s.status !== 'cancelled' && 
+            s.status !== 'expired' && 
+            s.status !== 'inactive' &&
+            s.status !== 'terminated' &&
+            s.status !== 'deleted'
+          );
+          if (validSubs.length > 0) {
+            const studioSub = validSubs.find((s: any) => determineCreemPlan(s) === 'studio');
+            activeSubscription = studioSub || validSubs[0];
           }
         }
       }
@@ -153,8 +169,8 @@ export async function checkCreemSubscription(email: string): Promise<{
       return {
         isActive: true,
         plan,
-        customerId: activeCustomer?.id || activeSubscription?.customer_id || activeSubscription?.customer || null,
-        subscriptionId: activeSubscription?.id || activeCustomer?.subscription_id || activeCustomer?.subscription || null,
+        customerId: activeCustomer?.id || activeSubscription?.customer_id || activeSubscription?.customer || activeCheckout?.customer_id || activeCheckout?.customer || null,
+        subscriptionId: activeSubscription?.id || activeCustomer?.subscription_id || activeCustomer?.subscription || activeCheckout?.subscription_id || activeCheckout?.subscription || null,
         expiresAt: activeSubscription?.current_period_end || activeSubscription?.period_end || activeCustomer?.current_period_end || activeCustomer?.period_end || null
       };
     }
@@ -168,36 +184,76 @@ export async function checkCreemSubscription(email: string): Promise<{
 
 /**
  * Cancel Creem subscription at period end so customer is not debited again.
+ * Discovers and cancels all active subscriptions on Creem by ID, email, or customerId.
  */
-export async function cancelCreemSubscription(subscriptionId: string): Promise<boolean> {
+export async function cancelCreemSubscription(
+  identifier: string | { subscriptionId?: string | null; customerId?: string | null; email?: string | null }
+): Promise<boolean> {
   try {
     const isTest = CREEM_API_KEY.startsWith('creem_test_');
     const apiBase = isTest ? 'https://test-api.creem.io' : 'https://api.creem.io';
     
-    // 1. Send cancel request to Creem API to stop future rebills
-    const res = await fetch(`${apiBase}/v1/subscriptions/${subscriptionId}/cancel`, {
-      method: 'POST',
-      headers: {
-        'x-api-key': CREEM_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        cancel_at_period_end: true
-      })
-    });
+    const subId = typeof identifier === 'string' ? identifier : identifier.subscriptionId;
+    const custId = typeof identifier === 'object' ? identifier.customerId : null;
+    const email = typeof identifier === 'object' ? identifier.email : null;
 
-    if (res.ok) return true;
+    const subIdsToCancel: string[] = [];
+    if (subId) subIdsToCancel.push(subId);
 
-    // 2. Direct fallback cancel
-    const fallback = await fetch(`${apiBase}/v1/subscriptions/${subscriptionId}/cancel`, {
-      method: 'POST',
-      headers: {
-        'x-api-key': CREEM_API_KEY,
-        'Content-Type': 'application/json'
+    // Look up active subscriptions for this email or customer on Creem
+    if (email || custId) {
+      try {
+        const queryUrl = email 
+          ? `${apiBase}/v1/subscriptions?email=${encodeURIComponent(email)}`
+          : `${apiBase}/v1/subscriptions?customer_id=${encodeURIComponent(custId!)}`;
+        const res = await fetch(queryUrl, {
+          headers: { 'x-api-key': CREEM_API_KEY }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const subs = Array.isArray(data) ? data : (data?.items || data?.data || (data?.id ? [data] : []));
+          for (const s of subs) {
+            if (s.id && !subIdsToCancel.includes(s.id)) {
+              subIdsToCancel.push(s.id);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Creem subscription discovery notice:', err);
       }
-    });
+    }
 
-    return fallback.ok;
+    let anySucceeded = false;
+    for (const id of subIdsToCancel) {
+      // 1. Send cancel request to Creem API to stop future rebills
+      const res = await fetch(`${apiBase}/v1/subscriptions/${id}/cancel`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': CREEM_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          cancel_at_period_end: true
+        })
+      });
+
+      if (res.ok) {
+        anySucceeded = true;
+        continue;
+      }
+
+      // 2. Direct fallback cancel
+      const fallback = await fetch(`${apiBase}/v1/subscriptions/${id}/cancel`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': CREEM_API_KEY,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (fallback.ok) anySucceeded = true;
+    }
+
+    return anySucceeded || subIdsToCancel.length === 0;
   } catch (e) {
     console.warn('Creem subscription cancel notice:', e);
     return false;
@@ -226,7 +282,7 @@ export async function cancelUserSubscription(
     };
   }
 
-  // 1. Look up Creem subscription ID and send cancellation to Creem backend
+  // Look up Creem subscription ID and send cancellation to Creem backend
   let subId = record.creemSubscriptionId;
   let custId = record.creemCustomerId;
 
@@ -242,9 +298,12 @@ export async function cancelUserSubscription(
     }
   }
 
-  if (subId) {
-    await cancelCreemSubscription(subId);
-  }
+  // Trigger Creem cancellation by subId, custId, and email
+  await cancelCreemSubscription({
+    subscriptionId: subId,
+    customerId: custId,
+    email: cleanEmail
+  });
 
   const nowIso = new Date().toISOString();
   record.status = 'cancelled';
