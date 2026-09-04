@@ -377,24 +377,13 @@ export default function PricingPage() {
                   </div>
                 )
               ) : currentPlan === 'studio' ? (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => handleCheckout('pro')}
-                    disabled={loadingPlan === 'pro'}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 py-3 text-xs font-bold text-cyan-300 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {loadingPlan === 'pro' ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <>
-                        <CreditCard className="h-4 w-4" />
-                        Switch to Pro — €4.99
-                      </>
-                    )}
-                  </button>
-                  <p className="mt-2 text-center text-[10px] text-slate-500">
-                    Switch to €4.99/mo plan
+                <div className="space-y-2">
+                  <div className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 py-3 text-xs font-bold text-slate-500 cursor-not-allowed select-none">
+                    <Lock className="h-3.5 w-3.5 text-slate-600" />
+                    <span>Available after current plan ends</span>
+                  </div>
+                  <p className="text-center text-[10px] text-slate-500">
+                    Changeable once your active Studio subscription ends
                   </p>
                 </div>
               ) : (
@@ -511,6 +500,16 @@ export default function PricingPage() {
                     </p>
                   </div>
                 )
+              ) : currentPlan === 'pro' ? (
+                <div className="space-y-2">
+                  <div className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-800 bg-slate-900/60 py-3 text-xs font-bold text-slate-500 cursor-not-allowed select-none">
+                    <Lock className="h-3.5 w-3.5 text-slate-600" />
+                    <span>Available after current plan ends</span>
+                  </div>
+                  <p className="text-center text-[10px] text-slate-500">
+                    Changeable once your active Pro subscription ends
+                  </p>
+                </div>
               ) : (
                 <div>
                   <button
@@ -524,7 +523,7 @@ export default function PricingPage() {
                     ) : (
                       <>
                         <CreditCard className="h-4 w-4" />
-                        {currentPlan === 'pro' ? 'Upgrade to Studio — €14.99' : 'Get Studio — €14.99'}
+                        Get Studio — €14.99
                       </>
                     )}
                   </button>
