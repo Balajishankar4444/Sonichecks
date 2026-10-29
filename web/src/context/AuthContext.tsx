@@ -35,7 +35,7 @@ interface AuthContextType {
   user: SonichecksUser | null;
   loading: boolean;
   isAuthModalOpen: boolean;
-  openAuthModal: (onSuccessCallback?: () => void) => void;
+  openAuthModal: (onSuccessCallback?: (user?: SonichecksUser) => void) => void;
   closeAuthModal: () => void;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, pass: string) => Promise<void>;
@@ -45,7 +45,7 @@ interface AuthContextType {
   syncUserWithServer: (overrideEmail?: string) => Promise<void>;
   cancelSubscription: () => Promise<{ success: boolean; message?: string }>;
   logout: () => Promise<void>;
-  authSuccessCallback: (() => void) | null;
+  authSuccessCallback: ((user?: SonichecksUser) => void) | null;
 }
 
 const LOCAL_USER_KEY = 'sonichecks_user_session_v1';
@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<SonichecksUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authSuccessCallback, setAuthSuccessCallback] = useState<(() => void) | null>(null);
+  const [authSuccessCallback, setAuthSuccessCallback] = useState<((user?: SonichecksUser) => void) | null>(null);
 
   const syncLoginWithServer = async (u: SonichecksUser, firestoreData?: Partial<SonichecksUser>) => {
     if (!u.email) return;
@@ -216,9 +216,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const openAuthModal = (callback?: () => void) => {
+  const openAuthModal = (callback?: (user?: SonichecksUser) => void) => {
     if (user) {
-      if (callback) callback();
+      if (callback) callback(user);
       return;
     }
     if (callback) {
@@ -244,7 +244,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (authSuccessCallback) {
       const cb = authSuccessCallback;
       setAuthSuccessCallback(null);
-      setTimeout(() => cb(), 50);
+      setTimeout(() => cb(signedInUser), 50);
     }
   };
 

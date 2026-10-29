@@ -27,7 +27,7 @@ import { FEATURE_MATRIX_ROWS } from '@/config/tiers';
 type Plan = 'pro' | 'studio';
 
 export default function PricingPage() {
-  const { user, cancelSubscription } = useAuth();
+  const { user, cancelSubscription, openAuthModal } = useAuth();
   const [localUsage, setLocalUsage] = useState<UsageState | null>(null);
 
   const [loadingPlan, setLoadingPlan] = useState<Plan | null>(null);
@@ -49,7 +49,23 @@ export default function PricingPage() {
   const currentPlan = user?.plan || localUsage?.plan || 'free';
   const isCancelled = user?.status === 'cancelled';
 
-  const handleCheckout = async (plan: Plan) => {
+  const handleCheckout = async (plan: Plan, overrideEmail?: string) => {
+    const activeEmail = (overrideEmail || user?.email)?.trim();
+
+    // Require user to be logged in before going to the payment portal
+    if (!activeEmail) {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('sonichecks_pending_plan_sync', plan);
+      }
+      openAuthModal((signedInUser) => {
+        const email = signedInUser?.email || user?.email;
+        if (email) {
+          handleCheckout(plan, email);
+        }
+      });
+      return;
+    }
+
     setLoadingPlan(plan);
 
     try {
@@ -60,7 +76,7 @@ export default function PricingPage() {
         },
         body: JSON.stringify({
           plan,
-          customerEmail: user?.email,
+          customerEmail: activeEmail,
         }),
       });
 
